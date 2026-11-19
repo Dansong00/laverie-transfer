@@ -15,7 +15,14 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const pool = new pg.Pool({ connectionString, max: 1 });
+const pool = new pg.Pool({
+  connectionString,
+  max: 1,
+  connectionTimeoutMillis: 10_000,
+});
+pool.on("error", (error) => {
+  console.error("idle postgres client error", error.code ?? "unknown");
+});
 
 try {
   await migrate(drizzle(pool), { migrationsFolder: "./drizzle" });

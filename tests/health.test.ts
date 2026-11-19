@@ -15,6 +15,11 @@ const pool = new pg.Pool({
   connectionString: databaseUrl,
   max: 2,
   allowExitOnIdle: true,
+  connectionTimeoutMillis: 10_000,
+  query_timeout: 5_000,
+});
+pool.on("error", () => {
+  // The suite closes this pool. An idle disconnect must not crash the run.
 });
 const db = drizzle(pool);
 const migrationsFolder = "./drizzle";
@@ -79,6 +84,9 @@ test("reports the database down when Postgres refuses the connection", async () 
     connectionTimeoutMillis: 1000,
     max: 1,
     allowExitOnIdle: true,
+  });
+  closed.on("error", () => {
+    // Refusal is asserted through readHealth.
   });
   try {
     const report = await readHealth(drizzle(closed));
