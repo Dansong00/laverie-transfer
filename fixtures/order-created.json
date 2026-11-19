@@ -1,0 +1,19 @@
+{
+  "event": "order_created",
+  "order": {
+    "id": 5500314,
+    "orderCode": "00314",
+    "storeId": 101,
+    "storeName": "Laverie SoHo",
+    "status": "SUBMITTED",
+    "dueDate": "2026-11-18T00:00:00.000Z",
+    "updatedAt": "2026-11-16T14:02:00.000Z"
+  },
+  "customer": {
+    "firstName": "Maya",
+    "lastName": "Testwell",
+    "phoneNumber": "+12125550142",
+    "email": "maya.testwell@example.com"
+  },
+  "services": [{"name":"Wash & Fold","modifiers":[{"name":"Hang Dry"}]}]
+}

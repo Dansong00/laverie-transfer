@@ -50,6 +50,25 @@ A healthy database looks like this:
 
 `ok` is true only when `SELECT 1` succeeds. `migrationVersion` is the latest row in `drizzle.__drizzle_migrations`. It is null when that table is not there yet. A database the app cannot reach returns HTTP 503 and `"database": "down"`.
 
+## Cents webhook intake
+
+Cents posts order events to `/api/cents/webhook`. Configure one custom header for the business and map the two locations to their Cents store IDs. For the local fixture, use these test values in `.env.local`.
+
+```dotenv
+CENTS_WEBHOOK_HEADER_NAME=X-Cents-Test
+CENTS_WEBHOOK_HEADER_SECRET=fixture-only
+CENTS_STORE_ALLOWLIST='{"soho":101,"east_village":102}'
+```
+
+With the local server running, send the fixture and inspect the most recent 50 redacted events.
+
+```bash
+pnpm cents:send fixtures/order-created.json
+pnpm db:show raw-events
+```
+
+The sender targets loopback on port 3000 or the local `PORT` setting. The webhook returns 200 after the insert commits. Unknown stores are recorded for review. Unrelated event types are acknowledged and skipped.
+
 ## Checks
 
 ```bash
