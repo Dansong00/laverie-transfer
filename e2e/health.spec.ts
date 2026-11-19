@@ -1,4 +1,9 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
+
+const journal = JSON.parse(
+  readFileSync("drizzle/meta/_journal.json", "utf8"),
+) as { entries: unknown[] };
 
 test("health route reads Postgres", async ({ request }) => {
   const response = await request.get("/api/health");
@@ -20,5 +25,7 @@ test("home page shows the health result", async ({ page }) => {
     page.getByRole("heading", { name: "Laverie Transfer" }),
   ).toBeVisible();
   await expect(page.getByText('"database": "up"')).toBeVisible();
-  await expect(page.getByText('"id": 1')).toBeVisible();
+  await expect(
+    page.getByText(`"id": ${journal.entries.length}`),
+  ).toBeVisible();
 });
