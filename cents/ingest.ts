@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getDb } from "../db/client";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { customerName, orderLock, storeMapping } from "./order-fields";
 import { applyCentsEvent, sourceTimestamp } from "./snapshot";
 import { centsOrders, centsRawEvents } from "../db/schema";
 
@@ -42,26 +43,9 @@ function redactBody(event: string, order: Record<string, unknown>, payload: Reco
         ? service.modifiers.filter(isObject).map(m => scalarFields(m, modifierFields))
         : undefined,
     })) : undefined,
-    customer: isObject(payload.customer) ? {
-      firstName: typeof payload.customer.firstName === "string" ? payload.customer.firstName : undefined,
-      lastInitial: typeof payload.customer.lastName === "string"
-        ? Array.from(payload.customer.lastName.trim())[0] : undefined,
-    } : undefined,
+    customer: isObject(payload.customer)
+      ? customerName(payload.customer.firstName, payload.customer.lastName) : undefined,
   };
-}
-
-function storeMapping() {
-  const raw: unknown = JSON.parse(process.env.CENTS_STORE_ALLOWLIST ?? "");
-  if (!isObject(raw)) throw new Error("Invalid Cents store mapping");
-  const mapping = new Map<string, string>();
-  for (const store of ["soho", "east_village"]) {
-    const id = raw[store];
-    if ((typeof id !== "string" && typeof id !== "number") || !String(id).trim() || mapping.has(String(id))) {
-      throw new Error("Invalid Cents store mapping");
-    }
-    mapping.set(String(id), store);
-  }
-  return mapping;
 }
 
 export class InvalidCentsEvent extends Error {}
@@ -106,8 +90,7 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
   const result = await getDb().transaction(async tx => {
     // Serialize first inserts too: a row lock cannot lock a missing snapshot.
     // Identical fingerprints also share this key, including malformed receipts.
-    const key = JSON.stringify([storeHint, orderNumber]);
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    await tx.execute(orderLock(storeHint, orderNumber));
     const [original] = await tx.select({ id: centsRawEvents.id })
       .from(centsRawEvents).where(eq(centsRawEvents.fingerprint, fingerprint))
       .orderBy(asc(centsRawEvents.id)).limit(1);

@@ -73,6 +73,18 @@ Use `cents_status_allows_transfer(status)` for the Cents part of an eligibility 
 
 Unknown stores are recorded for review. Unrelated event types are acknowledged and skipped.
 
+## Import a Cents Orders report
+
+Run the import against the same database and `CENTS_STORE_ALLOWLIST` used by webhook intake. The file must include `Order Code`, `Location`, and `Status`. Order codes retain leading zeros. Location can be a configured Cents store ID or a store name such as `SoHo`, `Laverie SoHo`, or `East Village`.
+
+```bash
+pnpm cents:backfill /path/to/orders.csv
+```
+
+The optional `Due Date` accepts ISO dates, US month/day/year dates, and timestamps. Dates and times without an offset use America/New_York. Optional first and last name columns contribute only a first name and last initial. The importer discards other customer fields and leaves the personal-detergent flag unset pending confirmation of the modifier name.
+
+Each row commits independently. The command reports inserted and already-present counts. If it stops on an invalid record, correct the file and run it again. An existing order keeps its snapshot. A newer webhook can supersede a backfilled order, and a backfilled terminal order stays ineligible if a later webhook tries to reopen it.
+
 ## Checks
 
 ```bash
