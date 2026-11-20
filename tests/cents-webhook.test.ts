@@ -18,7 +18,9 @@ beforeAll(() => {
   vi.stubEnv("CENTS_WEBHOOK_HEADER_SECRET", secret);
   vi.stubEnv("CENTS_STORE_ALLOWLIST", '{"soho":101,"east_village":102}');
 });
-beforeEach(async () => { await pool.query("delete from cents_raw_events"); });
+beforeEach(async () => {
+  await pool.query("delete from cents_orders; delete from cents_raw_events");
+});
 afterAll(async () => {
   vi.unstubAllEnvs();
   await pool.end();
@@ -74,5 +76,80 @@ test("returns a retryable failure and stores nothing when commit fails", async (
     expect(await rows()).toHaveLength(0);
   } finally {
     await pool.query("drop function reject_s2_test_event() cascade");
+  }
+});
+
+async function deliver(order: Record<string, unknown>, event = "order_updated") {
+  const response = await POST(request({ ...fixture, event, order: { ...fixture.order, ...order } }));
+  expect(response.status).toBe(200);
+}
+
+const snapshots = async () => (await pool.query("select * from cents_orders order by store_id")).rows;
+
+test("three concurrent deliveries record three receipts, two duplicates and one snapshot", async () => {
+  await Promise.all([deliver({}, fixture.event), deliver({}, fixture.event), deliver({}, fixture.event)]);
+  const [original, second, third] = await rows();
+  expect(original.duplicate_of).toBeNull();
+  expect([second.duplicate_of, third.duplicate_of]).toEqual([original.id, original.id]);
+  expect(await snapshots()).toMatchObject([{
+    store_id: "soho", order_number: "00314", cents_order_id: "5500314", status: "SUBMITTED",
+    source: "webhook", last_event_id: original.id, customer_first_name: "Maya", customer_last_initial: "T",
+    due_at: new Date(fixture.order.dueDate), source_updated_at: new Date(fixture.order.updatedAt),
+  }]);
+});
+
+test("concurrent and late events preserve the latest snapshot independently per store", async () => {
+  await Promise.all([
+    deliver({ status: "IN_PROGRESS", updatedAt: "2026-11-17T00:00:00.000002Z" }),
+    deliver({ status: "SUBMITTED", updatedAt: "2026-11-17T00:00:00.000001Z" }),
+    deliver({ storeId: 102, status: "READY_FOR_PICKUP" }),
+  ]);
+  await deliver({ status: "COMPLETED" }, "order_completed"); // older, despite terminal status
+  expect(await snapshots()).toMatchObject([
+    { store_id: "east_village", status: "READY_FOR_PICKUP" },
+    { store_id: "soho", status: "IN_PROGRESS" },
+  ]);
+});
+
+test.each(["COMPLETED", "CANCELLED"])("equal-time %s wins and a later reopen is flagged", async status => {
+  await deliver({});
+  await deliver({ status }, status === "COMPLETED" ? "order_completed" : "order_updated");
+  const [terminal] = await snapshots();
+  expect(terminal.status).toBe(status);
+  await deliver({ status: "IN_PROGRESS", updatedAt: "2026-11-17T00:00:00Z" });
+  expect(await snapshots()).toEqual([terminal]);
+  expect((await rows()).at(-1)).toMatchObject({ needs_review: true, review_reason: "reopen" });
+});
+
+test("equal-time nonterminal keeps the first event; missing time is retained for review", async () => {
+  await deliver({});
+  const first = await snapshots();
+  await deliver({ status: "IN_PROGRESS" });
+  await deliver({ status: "COMPLETED", updatedAt: undefined });
+  expect(await snapshots()).toEqual(first);
+  expect((await rows()).at(-1)).toMatchObject({ needs_review: true, review_reason: "missing_updated_at" });
+});
+
+test("a Cents completion leaves an existing transfer phase and handoff history intact", async () => {
+  await deliver({});
+  const staff = "22222222-2222-4222-8222-222222222230";
+  const op = "22222222-2222-4222-8222-222222222231";
+  try {
+    await pool.query("insert into staff(id,name,phone,role,created_at) values ($1,'Test','+15555550111','staff',now())", [staff]);
+    await pool.query("insert into operations(operation_id,staff_id,kind,request_hash,result,created_at) values ($1,$2,'send','test','{}',now())", [op, staff]);
+    await pool.query("insert into batches(id,origin,destination,created_by,created_at) values ('S3-test','soho','east_village',$1,now())", [staff]);
+    await pool.query(`
+      insert into batch_orders(batch_id,origin_store_id,store_id,order_number,phase,added_at,added_by_op,active)
+      values ('S3-test','soho','soho','00314','sent',now(),$1,true)
+    `, [op]);
+    await deliver({ status: "COMPLETED" }, "order_completed");
+    expect(await snapshots()).toMatchObject([{status: "COMPLETED"}]);
+    expect((await pool.query("select phase,active from batch_orders where batch_id='S3-test'")).rows)
+      .toEqual([{phase: "sent", active: true}]);
+    expect((await pool.query("select 1 from handoffs where batch_id='S3-test'")).rowCount).toBe(0);
+  } finally {
+    await pool.query("delete from batch_orders where batch_id='S3-test'; delete from batches where id='S3-test'");
+    await pool.query("delete from operations where operation_id=$1", [op]);
+    await pool.query("delete from staff where id=$1", [staff]);
   }
 });

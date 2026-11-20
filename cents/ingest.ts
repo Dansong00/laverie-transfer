@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getDb } from "../db/client";
-import { centsRawEvents } from "../db/schema";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { applyCentsEvent, sourceTimestamp } from "./snapshot";
+import { centsOrders, centsRawEvents } from "../db/schema";
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -95,14 +97,68 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
   const storeHint = typeof id === "number" || typeof id === "string" ? String(id) : null;
   const stores = storeMapping();
   const store = storeHint === null ? undefined : stores.get(storeHint);
-  let reviewReason: string | null = null;
-  if (!store) reviewReason = "unknown_store";
-  else if (!body.order.updatedAt) reviewReason = "missing_updated_at";
-  const [row] = await getDb().transaction(async tx => {
-    return tx.insert(centsRawEvents).values({
-      receivedAt, storeHint, fingerprint, body, needsReview: reviewReason !== null, reviewReason,
+  const order = body.order;
+  const orderNumber = identifier(order.orderCode);
+  const status = typeof order.status === "string" ? order.status.trim() : "";
+  const time = sourceTimestamp(order.updatedAt);
+  const dueAt = typeof order.dueDate === "string" ? new Date(order.dueDate) : null;
+
+  const result = await getDb().transaction(async tx => {
+    // Serialize first inserts too: a row lock cannot lock a missing snapshot.
+    // Identical fingerprints also share this key, including malformed receipts.
+    const key = JSON.stringify([storeHint, orderNumber]);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    const [original] = await tx.select({ id: centsRawEvents.id })
+      .from(centsRawEvents).where(eq(centsRawEvents.fingerprint, fingerprint))
+      .orderBy(asc(centsRawEvents.id)).limit(1);
+
+    let reviewReason: string | null = null;
+    if (!store) reviewReason = "unknown_store";
+    else if (!time) reviewReason = order.updatedAt ? "invalid_updated_at" : "missing_updated_at";
+    else if (!orderNumber || !status) reviewReason = "missing_order_fields";
+
+    const [receipt] = await tx.insert(centsRawEvents).values({
+      receivedAt, storeHint, fingerprint, body, duplicateOf: original?.id,
+      needsReview: reviewReason !== null, reviewReason,
     }).returning({ id: centsRawEvents.id });
+    const stored = receipt.id;
+    if (original) return { stored, effect: "duplicate", reviewReason };
+    if (!store || !time || !orderNumber || !status) return { stored, effect: "needs_review", reviewReason };
+
+    const orderKey = and(eq(centsOrders.storeId, store), eq(centsOrders.orderNumber, orderNumber));
+    const [current] = await tx.select({
+      status: centsOrders.status,
+      sourceUpdatedAt: sql<string | null>`to_char(${centsOrders.sourceUpdatedAt} at time zone 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    }).from(centsOrders).where(orderKey).for("update");
+    const effect = applyCentsEvent(current, { status, sourceUpdatedAt: time });
+    if (effect === "needs_review") {
+      reviewReason = "reopen";
+      await tx.update(centsRawEvents).set({ needsReview: true, reviewReason })
+        .where(eq(centsRawEvents.id, stored));
+    }
+    if (effect === "applied") {
+      const values = {
+        status, centsOrderId: identifier(order.id),
+        dueAt: dueAt && Number.isFinite(dueAt.getTime()) ? dueAt : null,
+        customerFirstName: body.customer?.firstName ?? null,
+        customerLastInitial: body.customer?.lastInitial ?? null,
+        source: "webhook", sourceUpdatedAt: sql`${time}::timestamptz`,
+        lastEventId: stored, updatedAt: receivedAt,
+      };
+      if (current) {
+        await tx.update(centsOrders).set(values).where(orderKey);
+      } else {
+        await tx.insert(centsOrders).values({ ...values, storeId: store, orderNumber, createdAt: receivedAt });
+      }
+    }
+    return { stored, effect, reviewReason };
   });
-  console.info({ event, fingerprint, store, effect: reviewReason ? "needs_review" : "stored", reviewReason });
-  return { stored: row.id, effect: reviewReason ? "needs_review" : "stored" } as const;
+  console.info({ event, fingerprint, store, effect: result.effect, reviewReason: result.reviewReason });
+  return { stored: result.stored, effect: result.effect };
+}
+
+function identifier(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value;
+  return typeof value === "number" && Number.isSafeInteger(value) ? String(value) : null;
 }
