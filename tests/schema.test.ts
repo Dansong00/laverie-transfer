@@ -366,3 +366,15 @@ async function insertMembership(row: {
     ],
   );
 }
+
+test.each(["COMPLETED", "CANCELLED"])("a %s order cannot be added to a planned batch", async status => {
+  await seedOrdersAndBatches();
+  await pool.query("update cents_orders set status=$1 where store_id='soho' and order_number='100'", [status]);
+  const candidates = await pool.query(
+    "select store_id from cents_orders where order_number='100' and cents_status_allows_transfer(status)",
+  );
+  expect(candidates.rows).toEqual([{ store_id: "east_village" }]);
+  await expect(insertMembership({
+    batchId: "SOHO-B001", originStoreId: "soho", storeId: "soho", orderNumber: "100", active: true, removedAt: null,
+  })).rejects.toMatchObject({ code: "23514", constraint: "batch_orders_nonterminal_order" });
+});
