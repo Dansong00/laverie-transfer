@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
@@ -12,6 +15,9 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL is not set. See README.md.");
 }
 
+// Workers inherit this run's inbox path. Only the test server writes to it.
+process.env.LAVERIE_TEST_INBOX ??= join(tmpdir(), `laverie-sms-${randomUUID()}`);
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
@@ -21,13 +27,17 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:3000",
   },
   webServer: {
-    command: "pnpm start",
+    command: "node --import ./e2e/sms-inbox.mjs node_modules/next/dist/bin/next start",
     url: "http://127.0.0.1:3000/api/health",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
     env: {
       ...process.env,
       DATABASE_URL: databaseUrl,
+      SESSION_SECRET: "playwright-only-session-key-for-local-tests",
+      APP_DOMAIN: "staff.example.test",
+      SMS_PROVIDER_API_KEY: "playwright-only",
+      SMS_FROM: "+12125550170",
     },
   },
   projects: [

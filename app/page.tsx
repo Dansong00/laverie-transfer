@@ -1,30 +1,26 @@
-import { connection } from "next/server";
+import Image from "next/image";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
-import { getDb } from "@/db/client";
-import { readHealth, type HealthReport } from "@/db/health";
+import { readSession, sessionCookie } from "../staff/session";
+import { signOut } from "./sign-in-actions";
+import { SignIn } from "./sign-in";
+import "./sign-in.css";
 
 export default function Home() {
   return (
-    <main>
-      <h1>Laverie Transfer</h1>
-      <p>Health check for this environment.</p>
-      <Suspense fallback={<p>Checking the database…</p>}>
-        <HealthPanel />
-      </Suspense>
+    <main className="sign-in">
+      <Image className="wordmark" src="/brand/laverie.webp" alt="Laverie" width={1500} height={428} priority />
+      <Suspense fallback={<p>Loading sign-in…</p>}><StaffAccess /></Suspense>
     </main>
   );
 }
 
-async function HealthPanel() {
-  await connection();
-  const report = await loadReport();
-  return <pre>{JSON.stringify(report, null, 2)}</pre>;
-}
-
-async function loadReport(): Promise<HealthReport> {
-  try {
-    return await readHealth(getDb());
-  } catch {
-    return { ok: false, database: "down", migrationVersion: null };
-  }
+async function StaffAccess() {
+  const actor = await readSession((await cookies()).get(sessionCookie)?.value);
+  if (!actor) return <SignIn />;
+  return <>
+    <h1>Signed in</h1>
+    <p>{actor.name}</p>
+    <form action={signOut}><button className="primary">Sign out</button></form>
+  </>;
 }
