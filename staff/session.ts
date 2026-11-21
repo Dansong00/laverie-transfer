@@ -16,17 +16,26 @@ function sessionId(token: string | undefined) {
   return parts[1];
 }
 
-export async function readSession(token: string | undefined) {
+export async function getProfile(token: string | undefined, db?: Pick<ReturnType<typeof getDb>, "update">) {
   const id = sessionId(token);
   if (!id) return null;
   const idleDays = Math.min(7, setting("SESSION_IDLE_DAYS", 7));
-  const [actor] = await getDb().update(sessions).set({ lastUsedAt: sql`now()` })
+  const [actor] = await (db ?? getDb()).update(sessions).set({ lastUsedAt: sql`now()` })
     .from(staff).where(and(
       eq(sessions.id, id), eq(sessions.staffId, staff.id), eq(staff.active, true),
       isNull(staff.disabledAt), isNull(sessions.revokedAt), gt(sessions.expiresAt, sql`now()`),
       gt(sessions.lastUsedAt, sql`now() - ${idleDays} * interval '1 day'`),
-    )).returning({ staffId: staff.id, name: staff.name, role: staff.role });
+    )).returning({
+      staffId: staff.id, name: staff.name, role: staff.role,
+      phone: sql<string | null>`case when ${staff.role} = 'admin' then ${staff.phone} end`,
+    });
   return actor ?? null;
+}
+
+export async function readSession(token: string | undefined) {
+  const profile = await getProfile(token);
+  if (!profile) return null;
+  return { staffId: profile.staffId, name: profile.name, role: profile.role };
 }
 
 export async function revokeSession(token: string | undefined) {

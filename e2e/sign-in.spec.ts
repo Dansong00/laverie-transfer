@@ -20,11 +20,16 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect.poll(() => readFile(inbox, "utf8").catch(() => "")).toMatch(/^\d{6}$/);
     await otp.fill(await readFile(inbox, "utf8"));
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("heading", { name: "Signed in" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
     const cookie = (await context.cookies()).find(c => c.name === "laverie_session");
     expect(cookie).toMatchObject({ secure: true, httpOnly: true, sameSite: "Lax" });
     await page.reload();
     await expect(page.getByText("Taylor")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Staff admin" })).toHaveCount(0);
+    await expect(page.getByText(phone)).toHaveCount(0);
+    expect((await page.request.get("/api/staff")).status()).toBe(403);
+    await page.goto("/staff");
+    await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
     const response = await page.request.get("/api/session?role=admin&staffId=forged");
     expect(await response.json()).toEqual({ name: "Taylor", role: "staff", staffId: person.id });
     await page.getByRole("button", { name: "Sign out" }).click();

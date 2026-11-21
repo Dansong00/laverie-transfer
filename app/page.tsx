@@ -1,7 +1,8 @@
+import Link from "next/link";
 import Image from "next/image";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
-import { readSession, sessionCookie } from "../staff/session";
+import { getProfile, sessionCookie } from "../staff/session";
 import { signOut } from "./sign-in-actions";
 import { SignIn } from "./sign-in";
 import "./sign-in.css";
@@ -16,11 +17,16 @@ export default function Home() {
 }
 
 async function StaffAccess() {
-  const actor = await readSession((await cookies()).get(sessionCookie)?.value);
+  const actor = await getProfile((await cookies()).get(sessionCookie)?.value);
   if (!actor) return <SignIn />;
   return <>
-    <h1>Signed in</h1>
-    <p>{actor.name}</p>
+    <h1>Profile</h1>
+    <dl className="profile">
+      <dt>Name</dt><dd>{actor.name}</dd>
+      <dt>Role</dt><dd>{actor.role === "admin" ? "Admin" : "Staff"}</dd>
+      {actor.phone && <><dt>Registered number</dt><dd>{actor.phone}</dd></>}
+    </dl>
+    {actor.role === "admin" && <Link className="link" href="/staff">Staff admin</Link>}
     <form action={signOut}><button className="primary">Sign out</button></form>
   </>;
 }
