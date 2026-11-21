@@ -60,6 +60,12 @@ At `/`, enter a mobile number and the six-digit code sent by text. US numbers al
 
 `GET /api/session` returns the signed-in staff member’s ID, name, and current role, or HTTP 401. A secure HTTP-only cookie identifies a server-side session. Sessions expire after 30 days or seven idle days. Sign-out revokes the session. Use HTTPS for SMS autofill on supported mobile browsers.
 
+## Profiles and staff administration
+
+After sign-in, the profile shows the staff member’s name and current role. Admins also see their registered number and a **Staff admin** link. In the directory, admins can register a number, change someone’s role, or disable their access. Disabling a staff member revokes all of their sessions immediately.
+
+Directory changes and their audit records commit together. The server rejects a change that would remove the last active admin, including concurrent changes. Retrying a confirmed change with the same operation ID returns the saved result.
+
 ## Cents webhook intake
 
 Cents posts order events to `/api/cents/webhook`. Configure one custom header for the business and map the two locations to their Cents store IDs. For the local fixture, use these test values in `.env.local`.

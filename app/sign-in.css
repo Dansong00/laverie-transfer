@@ -29,3 +29,6 @@ body { margin: 0; background: #fafaf9; color: #1f1f1f; font-family: Montserrat, 
 .slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 .slots span { display: grid; place-items: center; height: 54px; font: 600 24px monospace; }
 .otp:focus-within .slots [data-current=true] { outline: 2px solid #953b09; outline-offset: 1px; }
+.profile { margin: 0 0 16px; padding: 4px 18px 18px; background: white; border: 1px solid #deded9; border-radius: 12px; }
+.profile dt { margin-top: 14px; font-size: 12px; font-weight: 600; color: #555; }
+.profile dd { margin: 4px 0 0; font-size: 16px; }
