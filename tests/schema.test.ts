@@ -1,3 +1,4 @@
+import { openTransferStatuses } from "../cents/statuses";
 import { listEligibleOrders } from "../db/eligible-orders";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -368,13 +369,22 @@ async function insertMembership(row: {
   );
 }
 
-test.each(["COMPLETED", "CANCELLED"])("a %s order cannot be added to a planned batch", async status => {
+test("the database accepts the same open Cents statuses as the application", async () => {
+  const { rows } = await pool.query("select cents_open_transfer_statuses() as statuses");
+  expect(rows[0].statuses).toEqual(openTransferStatuses);
+  for (const status of openTransferStatuses) {
+    const { rows } = await pool.query("select cents_status_allows_transfer($1) as allowed", [
+      " " + status.toLowerCase() + " ",
+    ]);
+    expect(rows[0].allowed).toBe(true);
+  }
+});
+
+test.each(["COMPLETED", "CANCELLED", "VOIDED", "completed", "CANCELED"])("a %s order is excluded from listing and batch admission", async status => {
   await seedOrdersAndBatches();
   await pool.query("update cents_orders set status=$1 where store_id='soho' and order_number='100'", [status]);
-  const candidates = await pool.query(
-    "select store_id from cents_orders where order_number='100' and cents_status_allows_transfer(status)",
-  );
-  expect(candidates.rows).toEqual([{ store_id: "east_village" }]);
+  expect(await listEligibleOrders("soho")).toEqual([]);
+  expect((await listEligibleOrders("east_village")).map(row => row.orderNumber)).toEqual(["100"]);
   await expect(insertMembership({
     batchId: "SOHO-B001", originStoreId: "soho", storeId: "soho", orderNumber: "100", active: true, removedAt: null,
   })).rejects.toMatchObject({ code: "23514", constraint: "batch_orders_nonterminal_order" });
