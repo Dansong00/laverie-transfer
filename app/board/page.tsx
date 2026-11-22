@@ -7,6 +7,8 @@ import { boardSections } from "../../db/schema";
 import { readSession, sessionCookie } from "../../staff/session";
 import { getStaffPreferences } from "../../staff/preferences";
 import { getBatch, listBatchesForStore, sectionNames } from "../../transfer/board";
+import { BoardChanges, StoreButton } from "./store-actions";
+import type { StoreId } from "../../db/eligible-orders";
 import { BoardRefresh, SectionFilter } from "./controls";
 import "../sign-in.css";
 import "../orders/orders.css";
@@ -55,11 +57,14 @@ async function Board({ searchParams }: PageProps<"/board">) {
           </Link>
         ))}
       </nav>
-      {query.batch ? (
-        <BatchDetail id={query.batch} store={store} />
-      ) : (
-        <Sections store={store} staffId={actor.staffId} />
-      )}
+      {query.saved === "again" && <p role="status">Already saved.</p>}
+      <BoardChanges key={actor.staffId + store} staffId={actor.staffId} store={store}>
+        {query.batch ? (
+          <BatchDetail id={query.batch} store={store} />
+        ) : (
+          <Sections store={store} staffId={actor.staffId} />
+        )}
+      </BoardChanges>
       {query.batch && <Link href={base}>Back to {stores[store]} board</Link>}
     </main>
   );
@@ -93,10 +98,23 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
                     <span>
                       {card.total === 0 && section === "planned"
                         ? "Planned (empty)"
-                        : section === "processing" || section === "ready_for_return"
+                        : (section === "received" && card.ready > 0) || section === "processing" || section === "ready_for_return"
                           ? `${card.ready} of ${card.total} ready`
                           : `${card.total} ${card.total === 1 ? "order" : "orders"}`}
                     </span>
+                    {section === "arriving" && (
+                      <StoreButton
+                        label="Mark received"
+                        command={{
+                          kind: "runAction",
+                          action: "receive",
+                          origin: card.origin as StoreId,
+                          store,
+                          batchId: card.id,
+                          expectedVersion: card.version,
+                        }}
+                      />
+                    )}
                     {card.contentsChanged && <small>Contents changed, confirm before return</small>}
                   </li>
                 ))}
@@ -115,6 +133,15 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
   const detail = await getBatch(id);
   if (!detail || ![detail.origin, detail.destination].includes(store)) notFound();
   const { section, orders, history } = detail;
+  const origin = detail.origin as StoreId;
+  const command = { kind: "runAction", origin, store, batchId: id, expectedVersion: detail.version } as const;
+  const waiting = orders
+    .filter(({ membership }) => membership.active && membership.phase === "received")
+    .map(({ order }) => ({ storeId: origin, orderNumber: order.orderNumber }));
+  const processing = orders
+    .filter(({ membership }) => membership.active && membership.phase === "processing")
+    .map(({ order }) => ({ storeId: origin, orderNumber: order.orderNumber }));
+  const atDestination = detail.destination === store && !detail.batch.cancelledAt;
   return (
     <section className="batch-detail">
       <h2>{id}</h2>
@@ -131,6 +158,9 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
         !["planned", "returning", "recently_returned"].includes(section) && (
           <Link href={`/orders?store=${store}&contents=${encodeURIComponent(id)}`}>Check sent contents</Link>
         )}
+      {atDestination && section === "arriving" && (
+        <StoreButton label="Mark received" command={{ ...command, action: "receive" }} />
+      )}
       <h3>Orders</h3>
       {orders.length ? (
         <ul>
@@ -138,12 +168,44 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
             <li key={membership.id}>
               <strong>#{order.orderNumber}</strong>
               <span>{phaseNames[membership.phase] ?? membership.phase}</span>
+              {atDestination && membership.active && membership.phase === "received" && (
+                <StoreButton
+                  label="Start processing"
+                  command={{
+                    ...command,
+                    action: "startProcessing",
+                    orderKeys: [{ storeId: origin, orderNumber: order.orderNumber }],
+                  }}
+                />
+              )}
+              {atDestination && membership.active && membership.phase === "processing" && (
+                <StoreButton
+                  label="Mark ready"
+                  command={{
+                    ...command,
+                    action: "markReady",
+                    orderKeys: [{ storeId: origin, orderNumber: order.orderNumber }],
+                  }}
+                />
+              )}
               {order.isPersonalDetergent && <small>Personal detergent</small>}
             </li>
           ))}
         </ul>
       ) : (
         <p>No remaining orders.</p>
+      )}
+      {atDestination && waiting.length > 1 && (
+        <StoreButton
+          label={`Start processing ${waiting.length} received orders`}
+          command={{ ...command, action: "startProcessing", orderKeys: waiting }}
+        />
+      )}
+      {atDestination && processing.length > 0 && (
+        <StoreButton
+          label={`Mark ${processing.length} remaining ready`}
+          command={{ ...command, action: "markReady", orderKeys: processing }}
+        />
       )}
       <h3>Handoff history</h3>
       {history.length ? (

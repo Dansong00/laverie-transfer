@@ -10,7 +10,7 @@ test("two staff see departures across phones, with independent section preferenc
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
   const second = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
   const ids: string[] = [];
-  const tickets = ["BOARD-" + randomUUID(), "BOARD-" + randomUUID()];
+  const tickets = Array.from({ length: 5 }, () => "BOARD-" + randomUUID());
   async function signIn(client: BrowserContext, phone: string) {
     const staff = randomUUID(),
       session = randomUUID();
@@ -36,9 +36,9 @@ test("two staff see departures across phones, with independent section preferenc
       },
     ]);
   }
-  async function send(ticket: string) {
+  async function send(...selected: string[]) {
     const make = await second.request.post("/api/batches", {
-      data: { kind: "createBatch", operationId: randomUUID(), origin: "soho", add: [ticket] },
+      data: { kind: "createBatch", operationId: randomUUID(), origin: "soho", add: selected },
     });
     expect(make.ok()).toBeTruthy();
     const id = (await make.json()).result.batchId;
@@ -70,7 +70,7 @@ test("two staff see departures across phones, with independent section preferenc
     await expect(
       page.getByRole("region", { name: "Arriving" }).getByRole("link", { name: first }),
     ).toBeVisible();
-    const next = await send(tickets[1]);
+    const next = await send(...tickets.slice(1));
     await page.clock.fastForward(45_000);
     await expect(page.getByRole("link", { name: next, exact: true })).toBeVisible();
     await page.getByRole("link", { name: first, exact: true }).click();
@@ -90,6 +90,32 @@ test("two staff see departures across phones, with independent section preferenc
       other.getByRole("region", { name: "Arriving" }).getByRole("link", { name: first }),
     ).toBeVisible();
     await expect(other.getByRole("region")).toHaveCount(7);
+    const card = other
+      .getByRole("region", { name: "Arriving" })
+      .getByRole("listitem")
+      .filter({ has: other.getByRole("link", { name: next, exact: true }) });
+    other.on("dialog", (d) => d.accept());
+    await card.getByRole("button", { name: "Mark received" }).click();
+    await other.getByRole("button", { name: "Start processing", exact: true }).first().click();
+    await other.getByRole("button", { name: "Mark ready", exact: true }).first().click();
+    await expect(other.getByText("Received · 1 of 4 ready")).toBeVisible();
+    await other.getByRole("link", { name: "Back to East Village board" }).click();
+    const received = other.getByRole("region", { name: "Received", exact: true });
+    await expect(received.getByText("1 of 4 ready", { exact: true })).toBeVisible();
+    await received.getByRole("link", { name: next, exact: true }).click();
+    await other.getByRole("button", { name: "Start processing 3 received orders" }).click();
+    await expect(other.getByText("Processing · 1 of 4 ready")).toBeVisible();
+    await other.route(
+      "**/api/batches",
+      async (route) => {
+        expect((await route.fetch()).status()).toBe(200);
+        await route.abort();
+      },
+      { times: 1 },
+    );
+    await other.getByRole("button", { name: "Mark 3 remaining ready" }).click();
+    await expect(other.getByText("Already saved.", { exact: true })).toBeVisible();
+    await expect(other.getByText("Ready for return · 4 of 4 ready")).toBeVisible();
   } finally {
     await second.close();
     await pool.query("delete from handoffs where staff_id=any($1::uuid[])", [ids]);

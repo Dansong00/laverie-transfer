@@ -137,6 +137,17 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await expect(page.getByText(/Did not travel · Stayed at SoHo/)).toBeVisible();
     await pool.query("update staff set role='staff' where id=$1", [staff]);
     await page.reload();
+    await expect(page.getByText(/Receive the batch on the transfer board/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm contents" })).toHaveCount(0);
+    await page.getByRole("link", { name: "Transfer board" }).click();
+    const arriving = page
+      .getByRole("region", { name: "Arriving" })
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("link", { name: sentBatch, exact: true }) });
+    page.once("dialog", (d) => d.accept());
+    await arriving.getByRole("button", { name: "Mark received" }).click();
+    await expect(page.getByText("Received · 0 of 0 ready")).toBeVisible();
+    await page.getByRole("link", { name: "Check sent contents" }).click();
     await page.route(
       "**/api/batches",
       async (route) => {

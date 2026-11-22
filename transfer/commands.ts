@@ -4,7 +4,12 @@ type Existing = { batchId: string; expectedVersion: number };
 type Removal = { orderNumber: string; note: string };
 export type OrderKey = { storeId: StoreId; orderNumber: string };
 type Correction = { orderKey: OrderKey; reason: string };
+export type StoreAction = Existing & { kind: "runAction"; origin: StoreId; store: StoreId } & (
+    | { action: "receive" }
+    | { action: "startProcessing" | "markReady"; orderKeys: OrderKey[] }
+  );
 export type BatchChange =
+  | StoreAction
   | { kind: "createBatch"; origin: StoreId; add: string[] }
   | ({ kind: "updateBatch"; origin: StoreId; add: string[]; remove: Removal[] } & Existing)
   | ({ kind: "runAction"; action: "send"; origin: StoreId } & Existing)
@@ -97,6 +102,39 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
     if (new Set(remove.map((r) => r.orderKey.orderNumber)).size !== remove.length)
       throw new BatchError(400, "Select each order once.");
     return { operationId, change: { kind, origin, batchId, expectedVersion, remove } };
+  }
+  if (
+    kind === "runAction" &&
+    (input.action === "receive" || input.action === "startProcessing" || input.action === "markReady")
+  ) {
+    const { action, store } = input;
+    if (store !== "soho" && store !== "east_village")
+      throw new BatchError(400, "Select the receiving store.");
+    if ("add" in input || "remove" in input)
+      throw new BatchError(400, "This action cannot change batch membership.");
+    const common = { kind, origin, batchId, expectedVersion, store } as const;
+    if (action === "receive") {
+      if ("orderKeys" in input) throw new BatchError(400, "Receive applies to the whole batch.");
+      return { operationId, change: { ...common, action } };
+    }
+    if (!Array.isArray(input.orderKeys) || !input.orderKeys.length)
+      throw new BatchError(400, "Select at least one order.");
+    const numbers = input.orderKeys
+      .map((key) => {
+        if (!record(key) || key.storeId !== origin)
+          throw new BatchError(400, "Select orders from this batch’s origin.");
+        return ticket(key.orderNumber);
+      })
+      .sort();
+    if (new Set(numbers).size !== numbers.length) throw new BatchError(400, "Select each order once.");
+    return {
+      operationId,
+      change: {
+        ...common,
+        action,
+        orderKeys: numbers.map((orderNumber) => ({ storeId: origin, orderNumber })),
+      },
+    };
   }
   if (kind === "confirmContents" || (kind === "runAction" && input.action === "sendReturn")) {
     const store = input.store;
