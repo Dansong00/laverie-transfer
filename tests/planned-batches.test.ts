@@ -481,6 +481,8 @@ test("the two stores see the right sections, including retained orders after ass
     store: "soho",
   });
   expect(await saveBatch(token, acknowledge(7))).toMatchObject({ ok: false, status: 409 });
+  expect(await saveBatch(token, { ...sendReturn(7), store: "soho" })).toMatchObject({ ok: false, status: 403 });
+  expect(await getBatch(id)).toMatchObject({ version: 7, section: "ready_for_return" });
   expect(await sentBatchesAt("east_village")).toMatchObject([{ id }]);
   await saveBatch(token, sendReturn(7));
   expect(await sentBatchesAt("east_village")).toEqual([]);
