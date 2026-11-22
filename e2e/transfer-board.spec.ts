@@ -1,0 +1,108 @@
+import { createHmac, randomUUID } from "node:crypto";
+import { expect, test, type BrowserContext } from "@playwright/test";
+import pg from "pg";
+
+test("two staff see departures across phones, with independent section preferences", async ({
+  browser,
+  page,
+  context,
+}) => {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const second = await browser.newContext({ baseURL: "http://127.0.0.1:3000" });
+  const ids: string[] = [];
+  const tickets = ["BOARD-" + randomUUID(), "BOARD-" + randomUUID()];
+  async function signIn(client: BrowserContext, phone: string) {
+    const staff = randomUUID(),
+      session = randomUUID();
+    await pool.query("insert into staff(id,name,phone,role,created_at) values ($1,'Sam',$2,'staff',now())", [
+      staff,
+      phone,
+    ]);
+    ids.push(staff);
+    await pool.query(
+      "insert into sessions(id,staff_id,created_at,last_used_at,expires_at) values ($1,$2,now(),now(),now()+interval '1 day')",
+      [session, staff],
+    );
+    const signature = createHmac("sha256", "playwright-only-session-key-for-local-tests")
+      .update("session:" + session)
+      .digest("hex");
+    await client.addCookies([
+      {
+        name: "laverie_session",
+        value: session + "." + signature,
+        url: "http://127.0.0.1:3000",
+        httpOnly: true,
+        secure: true,
+      },
+    ]);
+  }
+  async function send(ticket: string) {
+    const make = await second.request.post("/api/batches", {
+      data: { kind: "createBatch", operationId: randomUUID(), origin: "soho", add: [ticket] },
+    });
+    expect(make.ok()).toBeTruthy();
+    const id = (await make.json()).result.batchId;
+    const sent = await second.request.post("/api/batches", {
+      data: {
+        kind: "runAction",
+        action: "send",
+        origin: "soho",
+        batchId: id,
+        expectedVersion: 1,
+        operationId: randomUUID(),
+      },
+    });
+    expect(sent.ok()).toBeTruthy();
+    return id as string;
+  }
+  try {
+    await signIn(context, "+12125550191");
+    await signIn(second, "+12125550192");
+    await pool.query(
+      "insert into cents_orders(store_id,order_number,status,source,created_at,updated_at) select 'soho',n,'SUBMITTED','webhook',now(),now() from unnest($1::text[]) n",
+      [tickets],
+    );
+    await page.clock.install();
+    await page.goto("/board?store=east_village");
+    await expect(page.getByRole("region", { name: "Arriving" })).toBeVisible();
+    const first = await send(tickets[0]);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      page.getByRole("region", { name: "Arriving" }).getByRole("link", { name: first }),
+    ).toBeVisible();
+    const next = await send(tickets[1]);
+    await page.clock.fastForward(45_000);
+    await expect(page.getByRole("link", { name: next, exact: true })).toBeVisible();
+    await page.getByRole("link", { name: first, exact: true }).click();
+    await expect(page.getByText("#" + tickets[0], { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/^Operation /)).toBeVisible();
+    await page.getByRole("link", { name: "Back to East Village board" }).click();
+    await page.getByText("Board sections", { exact: true }).click();
+    await page.getByRole("checkbox", { name: "Arriving", exact: true }).uncheck();
+    await page.getByRole("button", { name: "Save sections" }).click();
+    await expect(page.getByRole("region", { name: "Arriving" })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("region", { name: "Processing" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Arriving" })).toHaveCount(0);
+    const other = await second.newPage();
+    await other.goto("/board?store=east_village");
+    await expect(
+      other.getByRole("region", { name: "Arriving" }).getByRole("link", { name: first }),
+    ).toBeVisible();
+    await expect(other.getByRole("region")).toHaveCount(7);
+  } finally {
+    await second.close();
+    await pool.query("delete from handoffs where staff_id=any($1::uuid[])", [ids]);
+    await pool.query(
+      "delete from batch_orders where batch_id in (select id from batches where created_by=any($1::uuid[]))",
+      [ids],
+    );
+    await pool.query("delete from batches where created_by=any($1::uuid[])", [ids]);
+    await pool.query("delete from operations where staff_id=any($1::uuid[])", [ids]);
+    await pool.query("delete from staff_preferences where staff_id=any($1::uuid[])", [ids]);
+    await pool.query("delete from sessions where staff_id=any($1::uuid[])", [ids]);
+    await pool.query("delete from staff where id=any($1::uuid[])", [ids]);
+    await pool.query("delete from cents_orders where order_number=any($1)", [tickets]);
+    await pool.end();
+  }
+});

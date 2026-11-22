@@ -66,6 +66,12 @@ After sign-in, the profile shows the staff member’s name and current role. Adm
 
 Directory changes and their audit records commit together. The server rejects a change that would remove the last active admin, including concurrent changes. Retrying a confirmed change with the same operation ID returns the saved result.
 
+## Transfer board
+
+Open **Transfer board** from the staff profile. Planned batches appear at their origin. Arriving, Received, Processing, and Ready for return appear at the destination. Both stores see Returning and Recently returned. Open a batch to see its retained orders and handoff history. The board refreshes every 45 seconds while visible and when reopened or focused.
+
+**Board sections** saves the selected sections for the signed-in staff member across stores and devices. All seven sections start visible.
+
 ## Planned batches
 
 Open **Eligible orders** on the staff profile, select the origin store, and choose orders to create a planned batch. Open a batch from **Planned batches** to add orders, remove an order with a note, or cancel the batch. Cancellation keeps its history and releases orders that are still eligible for transfer.

@@ -26,6 +26,7 @@ async function StaffAccess() {
       <dt>Role</dt><dd>{actor.role === "admin" ? "Admin" : "Staff"}</dd>
       {actor.phone && <><dt>Registered number</dt><dd>{actor.phone}</dd></>}
     </dl>
+    <Link className="link" href="/board">Transfer board</Link>
     <Link className="link" href="/orders">Eligible orders</Link>
     {actor.role === "admin" && <Link className="link" href="/staff">Staff admin</Link>}
     <form action={signOut}><button className="primary">Sign out</button></form>
