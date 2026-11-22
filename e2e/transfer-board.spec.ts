@@ -96,8 +96,14 @@ test("two staff see departures across phones, with independent section preferenc
       .filter({ has: other.getByRole("link", { name: next, exact: true }) });
     other.on("dialog", (d) => d.accept());
     await card.getByRole("button", { name: "Mark received" }).click();
-    await other.getByRole("button", { name: "Start processing 4 received orders" }).click();
+    await other.getByRole("button", { name: "Start processing", exact: true }).first().click();
     await other.getByRole("button", { name: "Mark ready", exact: true }).first().click();
+    await expect(other.getByText("Received · 1 of 4 ready")).toBeVisible();
+    await other.getByRole("link", { name: "Back to East Village board" }).click();
+    const received = other.getByRole("region", { name: "Received", exact: true });
+    await expect(received.getByText("1 of 4 ready", { exact: true })).toBeVisible();
+    await received.getByRole("link", { name: next, exact: true }).click();
+    await other.getByRole("button", { name: "Start processing 3 received orders" }).click();
     await expect(other.getByText("Processing · 1 of 4 ready")).toBeVisible();
     await other.route(
       "**/api/batches",

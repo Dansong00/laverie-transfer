@@ -550,12 +550,12 @@ test("store actions use one version and one operation for the selected orders, i
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "processing", ready: 1, total: 4 },
   ]);
-  for (const cmd of [
-    storeOrders(6, "markReady", "1", "2"),
-    storeOrders(6, "markReady", "2", "5"),
-    storeOrders(5, "markReady", "2", "3"),
-  ]) {
-    expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 409 });
+  for (const [cmd, error] of [
+    [storeOrders(6, "markReady", "1", "2"), "Orders cannot move from processing: 1"],
+    [storeOrders(6, "markReady", "2", "5"), "Orders cannot move from processing: 5"],
+    [storeOrders(5, "markReady", "2", "3"), "This batch changed, refresh."],
+  ] as const) {
+    expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 409, error });
     expect((await pool.query("select from handoffs where operation_id=$1", [cmd.operationId])).rowCount).toBe(
       0,
     );

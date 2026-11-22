@@ -98,7 +98,7 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
                     <span>
                       {card.total === 0 && section === "planned"
                         ? "Planned (empty)"
-                        : section === "processing" || section === "ready_for_return"
+                        : (section === "received" && card.ready > 0) || section === "processing" || section === "ready_for_return"
                           ? `${card.ready} of ${card.total} ready`
                           : `${card.total} ${card.total === 1 ? "order" : "orders"}`}
                     </span>

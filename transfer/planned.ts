@@ -196,13 +196,7 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     .where(and(eq(batches.id, change.batchId), eq(batches.origin, change.origin)))
     .for("update");
   if (!batch) throw new BatchError(404, "Batch not found.");
-  if (batch.version !== change.expectedVersion) {
-    const affected =
-      isStoreAction(change) && change.action !== "receive"
-        ? " Orders: " + change.orderKeys.map((k) => k.orderNumber).join(", ")
-        : "";
-    throw new BatchError(409, "This batch changed, refresh." + affected);
-  }
+  if (batch.version !== change.expectedVersion) throw new BatchError(409, "This batch changed, refresh.");
   if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
