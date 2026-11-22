@@ -18,8 +18,14 @@ export function storeMapping() {
 
 // Both writers use the external store ID so a webhook can race the first import.
 export function orderLock(storeHint: string | null, orderNumber: string | null) {
-  const key = JSON.stringify([storeHint, orderNumber]);
-  return sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  return sql`select pg_advisory_xact_lock(hashtextextended(
+    jsonb_build_array(${storeHint}::text, cents_order_identity(${orderNumber}::text))::text, 0))`;
+}
+
+export function orderCode(value: unknown) {
+  if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
+  if (typeof value !== "string") return null;
+  return value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "") || null;
 }
 
 export function customerName(first: unknown, last: unknown) {
@@ -27,4 +33,15 @@ export function customerName(first: unknown, last: unknown) {
     firstName: typeof first === "string" ? first : undefined,
     lastInitial: typeof last === "string" ? Array.from(last.trim())[0] : undefined,
   };
+}
+
+// Start with statuses covered by webhook fixtures/tests. Extend only with a
+// confirmed mapping from a Cents export to a webhook status.
+const statuses = new Map(Object.entries({
+  SUBMITTED: "SUBMITTED", IN_PROGRESS: "IN_PROGRESS", READY_FOR_PICKUP: "READY_FOR_PICKUP",
+  COMPLETED: "COMPLETED", COMPLETE: "COMPLETED", CANCELLED: "CANCELLED", CANCELED: "CANCELLED",
+}));
+
+export function mappedStatus(value: string) {
+  return statuses.get(value.trim().toUpperCase().replace(/[\s-]+/g, "_"));
 }

@@ -1,7 +1,7 @@
-import { sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { centsOrders } from "../db/schema";
-import { customerName, orderLock, storeMapping } from "./order-fields";
+import { customerName, mappedStatus, orderCode, orderLock, storeMapping } from "./order-fields";
+import { parseOrderDueDate } from "./report-date";
 
 export class ReportError extends Error {}
 
@@ -27,29 +27,22 @@ export type ReportRow = {
   lastName?: string;
 };
 
-function dueDateValue(date: string) {
-  if (!date) return null;
-  // Normalize US report dates before Postgres parses them, independent of DateStyle.
-  const iso = date.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?=\s|$)/,
-    (_, m: string, d: string, y: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`);
-  if (!/^\d{4}-\d\d-\d\d(?:[ T]\d{1,2}:\d\d(?::\d\d(?:\.\d+)?)?(?:\s?[AP]M|Z|[+-]\d\d:\d\d)?)?$/i.test(iso)) {
-    throw new ReportError("Invalid Due Date");
-  }
-  if (/(?:Z|[+-]\d\d:\d\d)$/i.test(iso)) return sql`${iso}::timestamptz`;
-  return sql`${iso}::timestamp at time zone 'America/New_York'`;
-}
-
-export async function importBackfillRow(row: ReportRow, locations = reportLocations()) {
+export function prepareBackfillRow(row: ReportRow, locations = reportLocations()) {
   const location = locations.get(row.location.trim().toLowerCase());
   if (!location) throw new ReportError("Unknown Location");
-  const orderNumber = row.orderCode.trim();
+  const orderNumber = orderCode(row.orderCode);
   if (!orderNumber) throw new ReportError("Missing Order Code");
-  let status = row.status.trim().toUpperCase().replace(/[\s-]+/g, "_");
-  if (!status) throw new ReportError("Missing Status");
-  if (status === "CANCELED") status = "CANCELLED";
-  if (status === "COMPLETE") status = "COMPLETED";
+  const status = mappedStatus(row.status);
+  if (!status) throw new ReportError("Unrecognized Status");
+  const date = row.dueDate?.trim();
+  const dueAt = date ? parseOrderDueDate(date) : null;
+  if (date && !dueAt) throw new ReportError("Invalid Due Date");
   const name = customerName(row.firstName?.trim() || undefined, row.lastName);
-  const dueAt = dueDateValue(row.dueDate?.trim() ?? "");
+  return { location, orderNumber, status, dueAt, name };
+}
+
+export async function insertBackfillRow(prepared: ReturnType<typeof prepareBackfillRow>) {
+  const { location, orderNumber, status, dueAt, name } = prepared;
   return getDb().transaction(async tx => {
     await tx.execute(orderLock(location.centsId, orderNumber));
     const now = new Date();
@@ -57,8 +50,12 @@ export async function importBackfillRow(row: ReportRow, locations = reportLocati
       storeId: location.storeId, orderNumber, status, dueAt,
       customerFirstName: name.firstName, customerLastInitial: name.lastInitial,
       source: "backfill", sourceUpdatedAt: null, createdAt: now, updatedAt: now,
-    }).onConflictDoNothing({ target: [centsOrders.storeId, centsOrders.orderNumber] })
+    }).onConflictDoNothing()
       .returning({ orderNumber: centsOrders.orderNumber });
     return inserted.length ? "inserted" : "already_present";
   });
+}
+
+export function importBackfillRow(row: ReportRow, locations = reportLocations()) {
+  return insertBackfillRow(prepareBackfillRow(row, locations));
 }
