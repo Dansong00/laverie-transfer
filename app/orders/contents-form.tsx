@@ -139,6 +139,19 @@ export function ContentsForm({
           </li>
         ))}
       </ul>
+      {trip.emptyCorrections.length > 0 && (
+        <>
+          <h3>Empty batch corrections</h3>
+          <ul>
+            {trip.emptyCorrections.map((c) => (
+              <li key={c.operationId}>
+                {c.fromPhase} → {c.toPhase} · {c.reason} · {c.staffName} · {c.at.toISOString()} · Operation{" "}
+                {c.operationId}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {trip.confirmations.length > 0 && (
         <>
           <h3>Contents confirmations</h3>

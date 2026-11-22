@@ -2,7 +2,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import type { StoreId } from "../../db/eligible-orders";
-import type { PhaseCorrection, StoreAction } from "../../transfer/commands";
+import { correctionReasonLimit, type PhaseCorrection, type StoreAction } from "../../transfer/commands";
 import { useBatchChange } from "../use-batch-change";
 
 const Changes = createContext<ReturnType<typeof useBatchChange> | null>(null);
@@ -52,7 +52,7 @@ export function StoreButton({ command, label }: { command: StoreAction; label: s
 type CorrectionInput = Omit<PhaseCorrection, "kind" | "reason"> &
   (
     | { kind: "correctTravelPhase" }
-    | Pick<Extract<PhaseCorrection, { kind: "stepBackOrder" }>, "kind" | "orderKey">
+    | Pick<Extract<PhaseCorrection, { kind: "stepBackOrder" }>, "kind" | "store" | "orderKey">
   );
 
 export function CorrectionForm({ command, label }: { command: CorrectionInput; label: string }) {
@@ -70,7 +70,7 @@ export function CorrectionForm({ command, label }: { command: CorrectionInput; l
       >
         <fieldset disabled={changes.busy || changes.uncertain}>
           <label>
-            Reason for correction <input name="reason" required pattern=".*\S.*" />
+            Reason for correction <input name="reason" required maxLength={correctionReasonLimit} pattern=".*\S.*" />
           </label>
           <button>Save correction</button>
         </fieldset>

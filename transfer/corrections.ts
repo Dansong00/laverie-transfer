@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../db/client";
-import { batches, batchOrders, handoffs, operations } from "../db/schema";
+import { batches, batchOrders, handoffs, operations, staff } from "../db/schema";
 import { BatchError, type PhaseCorrection } from "./commands";
 import { travelPhase } from "./processing";
 
@@ -19,6 +19,7 @@ export async function reversePhase(
   at: Date,
 ): Promise<CorrectionRecord> {
   const single = change.kind === "stepBackOrder";
+  if (single && change.store !== batch.destination) throw new BatchError(403, "Select the receiving store.");
   const members = await tx
     .select()
     .from(batchOrders)
@@ -115,4 +116,27 @@ export async function reversePhase(
       .where(eq(batches.id, batch.id));
   }
   return { fromPhase, toPhase, reason: change.reason, orderCount: members.length };
+}
+
+export function listEmptyCorrections(db: Pick<Tx, "select">, batchId: string) {
+  // Empty batches have no order handoffs. Keep their corrections visible too.
+  return db
+    .select({
+      operationId: operations.operationId,
+      at: operations.createdAt,
+      staffName: staff.name,
+      reason: correctionReason,
+      fromPhase: sql<string>`${operations.result} #>> '{result,correction,fromPhase}'`,
+      toPhase: sql<string>`${operations.result} #>> '{result,correction,toPhase}'`,
+    })
+    .from(operations)
+    .innerJoin(staff, eq(staff.id, operations.staffId))
+    .where(
+      and(
+        eq(operations.batchId, batchId),
+        eq(operations.kind, "correctTravelPhase"),
+        sql`${operations.result} #>> '{result,correction,orderCount}' = '0'`,
+      ),
+    )
+    .orderBy(asc(operations.createdAt));
 }

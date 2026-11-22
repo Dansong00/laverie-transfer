@@ -217,6 +217,7 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
                     command={{
                       ...correction,
                       kind: "stepBackOrder",
+                      store,
                       orderKey: { storeId: origin, orderNumber: order.orderNumber },
                     }}
                   />

@@ -8,8 +8,9 @@ export type StoreAction = Existing & { kind: "runAction"; origin: StoreId; store
     | { action: "receive" }
     | { action: "startProcessing" | "markReady"; orderKeys: OrderKey[] }
   );
+export const correctionReasonLimit = 1000;
 export type PhaseCorrection = Existing & { origin: StoreId; reason: string } & (
-    | { kind: "stepBackOrder"; orderKey: OrderKey }
+    | { kind: "stepBackOrder"; store: StoreId; orderKey: OrderKey }
     | { kind: "correctTravelPhase" }
   );
 export type BatchChange =
@@ -83,6 +84,8 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
   if (kind === "stepBackOrder" || kind === "correctTravelPhase") {
     if (typeof input.reason !== "string" || !input.reason.trim())
       throw new BatchError(400, "Enter a reason for the correction.");
+    if (input.reason.trim().length > correctionReasonLimit)
+      throw new BatchError(400, `Use at most ${correctionReasonLimit} characters for the correction reason.`);
     if ("orderKeys" in input || "remove" in input || "add" in input)
       throw new BatchError(400, "Invalid selection for a phase correction.");
     const common = { origin, batchId, expectedVersion, reason: input.reason.trim() } as const;
@@ -90,10 +93,12 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
       if ("orderKey" in input) throw new BatchError(400, "Travel corrections apply to the whole batch.");
       return { operationId, change: { kind, ...common } };
     }
+    const { store } = input;
+    if (store !== "soho" && store !== "east_village") throw new BatchError(400, "Select the receiving store.");
     if (!record(input.orderKey) || input.orderKey.storeId !== origin)
       throw new BatchError(400, "Select one order from this batch’s origin.");
     const orderKey = { storeId: origin, orderNumber: ticket(input.orderKey.orderNumber) } as const;
-    return { operationId, change: { kind, ...common, orderKey } };
+    return { operationId, change: { kind, ...common, store, orderKey } };
   }
   if (kind === "correctSentMembership") {
     if ("add" in input || !Array.isArray(input.remove) || !input.remove.length)

@@ -1,9 +1,9 @@
-import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or } from "drizzle-orm";
 import { getDb } from "../db/client";
 import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, boardSections, centsOrders, handoffs, operations, staff } from "../db/schema";
 
-import { correctionReason } from "./corrections";
+import { correctionReason, listEmptyCorrections } from "./corrections";
 import { receiptRecorded, travelPhase } from "./processing";
 
 export type Section = (typeof boardSections)[number];
@@ -135,26 +135,7 @@ export async function getBatch(batchId: string) {
         .innerJoin(staff, eq(staff.id, handoffs.staffId))
         .where(eq(handoffs.batchId, batchId))
         .orderBy(asc(handoffs.at), asc(handoffs.orderNumber), asc(handoffs.id));
-      // Empty batches have no order handoffs. Keep their corrections visible too.
-      const emptyCorrections = await tx
-        .select({
-          operationId: operations.operationId,
-          at: operations.createdAt,
-          staffName: staff.name,
-          reason: correctionReason,
-          fromPhase: sql<string>`${operations.result} #>> '{result,correction,fromPhase}'`,
-          toPhase: sql<string>`${operations.result} #>> '{result,correction,toPhase}'`,
-        })
-        .from(operations)
-        .innerJoin(staff, eq(staff.id, operations.staffId))
-        .where(
-          and(
-            eq(operations.batchId, batchId),
-            eq(operations.kind, "correctTravelPhase"),
-            sql`${operations.result} #>> '{result,correction,orderCount}' = '0'`,
-          ),
-        )
-        .orderBy(asc(operations.createdAt));
+      const emptyCorrections = await listEmptyCorrections(tx, batchId);
       const phases: Counts = {};
       for (const { membership } of orders) phases[membership.phase] = (phases[membership.phase] ?? 0) + 1;
       return {

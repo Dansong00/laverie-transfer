@@ -5,7 +5,7 @@ import { listEligibleOrders } from "../db/eligible-orders";
 import { sessionToken } from "../staff/session";
 import { saveBatch, plannedBatches, plannedMembers } from "../transfer/planned";
 import { getBatch, listBatchesForStore } from "../transfer/board";
-import { sentBatchesAt } from "../transfer/contents";
+import { contentsHistory, sentBatchesAt } from "../transfer/contents";
 import { boardSections } from "../db/schema";
 import { getStaffPreferences, updateStaffPreferences } from "../staff/preferences";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
@@ -619,6 +619,21 @@ test("staff reverse one store phase at a time with a reason and keep both handof
   await expect(saveBatch(token, { ...orderBack(5), orderKeys: [] })).rejects.toMatchObject({ status: 400 });
   expect(await saveBatch(token, orderBack(4))).toMatchObject({ ok: false, status: 409 });
   expect(await saveBatch(token, orderBack(5, "missing"))).toMatchObject({ ok: false, status: 409 });
+  await expect(saveBatch(token, { ...orderBack(5), store: undefined })).rejects.toMatchObject({
+    status: 400,
+  });
+  await expect(saveBatch(token, { ...orderBack(5), reason: "x".repeat(1001) })).rejects.toMatchObject({
+    status: 400,
+  });
+  const wrongStore = { ...orderBack(5), store: "soho" };
+  expect(await saveBatch(token, wrongStore)).toMatchObject({ ok: false, status: 403 });
+  expect(await getBatch("SOHO-B001")).toMatchObject({
+    version: 5,
+    phaseCounts: { processing: 1, ready_for_return: 1 },
+  });
+  expect(
+    (await pool.query("select id from handoffs where operation_id=$1", [wrongStore.operationId])).rowCount,
+  ).toBe(0);
   const undo = orderBack(5);
   expect(await saveBatch(token, undo)).toMatchObject({ ok: true, result: { version: 6 } });
   expect(await saveBatch(token, undo)).toMatchObject({ ok: true, replayed: true });
@@ -708,6 +723,9 @@ test("an empty outbound batch can reverse receipt without inventing an order han
     history: [{ handoff: { action: "send" } }, { handoff: { action: "correctSentMembership" } }],
     emptyCorrections: [{ fromPhase: "received", toPhase: "sent", reason: "Departure recorded early" }],
   });
+  expect((await contentsHistory("SOHO-B001")).emptyCorrections).toMatchObject([
+    { fromPhase: "received", toPhase: "sent", reason: "Departure recorded early", staffName: "Taylor" },
+  ]);
   expect(await saveBatch(token, receive(5))).toMatchObject({ ok: true });
   expect(await saveBatch(token, confirm(6))).toMatchObject({ ok: true });
 });

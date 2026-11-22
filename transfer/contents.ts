@@ -4,7 +4,7 @@ import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, handoffs, operations, staff } from "../db/schema";
 import { BatchError, type BatchChange, type OrderKey } from "./commands";
 
-import { correctionReason } from "./corrections";
+import { correctionReason, listEmptyCorrections } from "./corrections";
 import { receiptRecorded, travelPhase } from "./processing";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -39,7 +39,7 @@ export async function sentBatchesAt(store: StoreId) {
 
 export async function contentsHistory(batchId: string) {
   const db = getDb();
-  const [members, confirmations, custody] = await Promise.all([
+  const [members, confirmations, custody, emptyCorrections] = await Promise.all([
     db
       .select({
         number: batchOrders.orderNumber,
@@ -77,10 +77,12 @@ export async function contentsHistory(batchId: string) {
       .innerJoin(staff, eq(staff.id, handoffs.staffId))
       .where(eq(handoffs.batchId, batchId))
       .orderBy(asc(handoffs.at), asc(handoffs.orderNumber)),
+    listEmptyCorrections(db, batchId),
   ]);
   return {
     members,
     custody,
+    emptyCorrections,
     confirmations: confirmations.flatMap((row) => {
       const record = row.result as { ok: boolean; result?: { confirmation?: Confirmation } };
       return record.ok && record.result?.confirmation
