@@ -312,3 +312,125 @@ test("a database error rolls back the whole departure and leaves the same reques
   await pool.query("alter table batches drop constraint test_version");
   expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, result: { version: 2 } });
 });
+
+const trip = (version: number) => ({ ...edit("SOHO-B001", version), store: "east_village" });
+const correction = (version: number, ...numbers: string[]) => ({
+  ...trip(version),
+  kind: "correctSentMembership",
+  remove: numbers.map((orderNumber) => ({
+    orderKey: { storeId: "soho", orderNumber },
+    reason: "Stayed at SoHo",
+  })),
+});
+const confirm = (version: number) => ({ ...trip(version), kind: "confirmContents" });
+const sendReturn = (version: number) => ({ ...trip(version), kind: "runAction", action: "sendReturn" });
+
+test("a corrected batch needs a versioned contents confirmation before return, including after a second correction", async () => {
+  const admin = await account("+12125550123");
+  await pool.query("update staff set role='admin' where id=$1", [admin.id]);
+  await saveBatch(token, create(["1", "2", "3"]));
+  await saveBatch(token, send());
+  // S12 supplies these phases through staff actions; use its mixed-phase starting state here.
+  await pool.query(
+    "update batch_orders set phase=case when order_number='1' then 'processing' else 'ready_for_return' end",
+  );
+  const remove = correction(2, "1");
+  expect(await saveBatch(token, { ...remove, role: "admin", staffId: admin.id })).toMatchObject({
+    ok: false,
+    status: 403,
+  });
+  const fix = { ...remove, operationId: randomUUID() };
+  expect(await saveBatch(admin.token, fix)).toMatchObject({ ok: true, result: { version: 3 } });
+  const rows = await pool.query(
+    "select c.corrects=s.id linked,c.staff_id,c.operation_id,bo.removal_note,bo.active from handoffs c join handoffs s on s.action='send' and s.order_number=c.order_number join batch_orders bo on bo.removed_by_op=c.operation_id where c.action='correctSentMembership'",
+  );
+  expect(rows.rows).toEqual([
+    {
+      linked: true,
+      staff_id: admin.id,
+      operation_id: fix.operationId,
+      removal_note: "Stayed at SoHo",
+      active: false,
+    },
+  ]);
+  const blocked = sendReturn(3);
+  expect(await saveBatch(token, blocked)).toMatchObject({
+    ok: false,
+    status: 409,
+    error: "Contents changed, confirm before return.",
+  });
+  expect(await saveBatch(token, { ...confirm(3), store: "soho" })).toMatchObject({ ok: false, status: 403 });
+  const cmd = confirm(3);
+  const orderKeys = ["2", "3"].map((orderNumber) => ({ storeId: "soho", orderNumber }));
+  expect(await saveBatch(token, cmd)).toMatchObject({
+    ok: true,
+    result: { version: 4, confirmation: { staffId, at: expect.any(String), orderKeys } },
+  });
+  expect(
+    (
+      await pool.query(
+        "select contents_changed,contents_confirmed_by,contents_confirmed_at,contents_confirmed_order_keys from batches",
+      )
+    ).rows[0],
+  ).toEqual({
+    contents_changed: false,
+    contents_confirmed_by: staffId,
+    contents_confirmed_at: expect.any(Date),
+    contents_confirmed_order_keys: orderKeys,
+  });
+  expect(await saveBatch(admin.token, correction(4, "2"))).toMatchObject({
+    ok: true,
+    result: { version: 5 },
+  });
+  expect(await saveBatch(token, cmd)).toMatchObject({
+    ok: true,
+    replayed: true,
+    result: { version: 4, confirmation: { orderKeys } },
+  });
+  expect(await saveBatch(token, sendReturn(5))).toMatchObject({ ok: false, status: 409 });
+  expect(await saveBatch(token, confirm(5))).toMatchObject({
+    ok: true,
+    result: { version: 6, confirmation: { orderKeys: [orderKeys[1]] } },
+  });
+  expect(await saveBatch(token, sendReturn(6))).toMatchObject({ ok: true, result: { version: 7 } });
+  expect((await pool.query("select order_number from handoffs where action='sendReturn'")).rows).toEqual([
+    { order_number: "3" },
+  ]);
+  expect(await saveBatch(admin.token, correction(7, "3"))).toMatchObject({ ok: false, status: 409 });
+});
+
+test("sent corrections are remove-only, validate every member and never reopen a fully corrected batch", async () => {
+  await pool.query("update staff set role='admin' where id=$1", [staffId]);
+  await saveBatch(token, create(["1", "2"]));
+  expect(await saveBatch(token, correction(1, "1"))).toMatchObject({ ok: false });
+  await saveBatch(token, send());
+  const cmd = correction(2, "1", "2");
+  await expect(saveBatch(token, { ...cmd, add: ["3"] })).rejects.toMatchObject({ status: 400 });
+  await expect(
+    saveBatch(token, { ...cmd, remove: [{ ...cmd.remove[0], reason: " " }] }),
+  ).rejects.toMatchObject({ status: 400 });
+  expect(await saveBatch(token, correction(2, "1", "5"))).toMatchObject({ ok: false });
+  expect((await pool.query("select from handoffs where corrects is not null")).rowCount).toBe(0);
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true });
+  expect(await saveBatch(token, { ...cmd, remove: [...cmd.remove].reverse() })).toMatchObject({
+    replayed: true,
+  });
+  expect(await plannedBatches("soho")).toEqual([]);
+  expect(await saveBatch(token, { ...edit("SOHO-B001", 3), add: ["3"] })).toMatchObject({ ok: false });
+  expect(await saveBatch(token, confirm(3))).toMatchObject({
+    ok: true,
+    result: { confirmation: { orderKeys: [] } },
+  });
+  expect(await plannedBatches("soho")).toEqual([]);
+  expect(await saveBatch(token, sendReturn(4))).toMatchObject({ ok: false });
+});
+
+test("a session with an unsupported role cannot send and its rejection is replayed after a role change", async () => {
+  await saveBatch(token, create(["1"]));
+  await pool.query("update staff set role='viewer' where id=$1", [staffId]);
+  const cmd = send();
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 403 });
+  await pool.query("update staff set role='staff' where id=$1", [staffId]);
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 403, replayed: true });
+  expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+});

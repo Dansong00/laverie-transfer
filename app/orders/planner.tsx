@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import type { StoreId } from "../../db/eligible-orders";
 import type { BatchChange } from "../../transfer/commands";
 
+import { ContentsForm, type SentTrip } from "./contents-form";
+
 type Plan = { id: string; version: number };
 type Props = {
   staffId: string;
@@ -11,9 +13,11 @@ type Props = {
   plan?: Plan;
   members: string[];
   children: ReactNode;
+  trip?: SentTrip;
+  admin: boolean;
 };
 
-export function Planner({ staffId, origin, plan, members, children }: Props) {
+export function Planner({ staffId, origin, plan, members, children, trip, admin }: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [uncertain, setUncertain] = useState(false);
@@ -42,7 +46,11 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
           setMessage("");
           return;
         }
-        const isSend = JSON.parse(body).action === "send";
+        const command = JSON.parse(body);
+        const autoCheck =
+          command.action === "send" ||
+          command.kind === "confirmContents" ||
+          command.kind === "correctSentMembership";
         if (change) localStorage.setItem(key, body);
         setBusy(true);
         async function request(statusOnly: boolean) {
@@ -59,7 +67,7 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
         try {
           response = await request(checkOnly);
         } catch (error) {
-          if (!isSend || checkOnly) throw error;
+          if (!autoCheck || checkOnly) throw error;
           setUncertain(true);
           setMessage("Not confirmed yet, checking…");
           checkOnly = true;
@@ -67,7 +75,7 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
         }
         if (response.status === 202) {
           setUncertain(true);
-          setMessage("Departure is still unconfirmed. Retry to check and finish marking this batch sent.");
+          setMessage("Still unconfirmed. Retry to check and finish this change.");
           return;
         }
         if (response.status === 401) {
@@ -85,7 +93,8 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
           return;
         }
         const params = new URLSearchParams({ store: origin });
-        if (result.result.sent) params.set("sent", result.result.batchId);
+        if (result.result.contents) params.set("contents", result.result.batchId);
+        else if (result.result.sent) params.set("sent", result.result.batchId);
         else if (!result.result.cancelled) params.set("batch", result.result.batchId);
         if (result.replayed) params.set("saved", "again");
         navigating = true;
@@ -109,7 +118,13 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
       if (!key) return;
       setUncertain(true);
       const body = localStorage.getItem(key);
-      if (body && JSON.parse(body).action === "send") {
+      const command = body && JSON.parse(body);
+      if (
+        command &&
+        (command.action === "send" ||
+          command.kind === "correctSentMembership" ||
+          command.kind === "confirmContents")
+      ) {
         setMessage("Not confirmed yet, checking…");
         void submit(undefined, true);
       } else {
@@ -148,87 +163,93 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
 
   return (
     <>
-      <form onSubmit={save}>
-        <fieldset disabled={busy || uncertain}>
-          {plan && (
-            <section>
-              <h2>{plan.id}</h2>
-              {members.length ? (
-                <ul>
-                  {members.map((number) => (
-                    <li key={number}>
-                      <strong>#{number}</strong>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={removing.includes(number)}
-                          onChange={(e) =>
-                            setRemoving(
-                              e.target.checked ? [...removing, number] : removing.filter((n) => n !== number),
-                            )
-                          }
-                        />{" "}
-                        Remove
-                      </label>
-                      {removing.includes(number) && (
-                        <label className="removal-note">
-                          Reason for removing #{number}
-                          <input required name={"note-" + number} />
+      {trip ? (
+        <ContentsForm trip={trip} store={origin} admin={admin} disabled={busy || uncertain} submit={submit} />
+      ) : (
+        <form onSubmit={save}>
+          <fieldset disabled={busy || uncertain}>
+            {plan && (
+              <section>
+                <h2>{plan.id}</h2>
+                {members.length ? (
+                  <ul>
+                    {members.map((number) => (
+                      <li key={number}>
+                        <strong>#{number}</strong>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={removing.includes(number)}
+                            onChange={(e) =>
+                              setRemoving(
+                                e.target.checked
+                                  ? [...removing, number]
+                                  : removing.filter((n) => n !== number),
+                              )
+                            }
+                          />{" "}
+                          Remove
                         </label>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>Planned (empty)</p>
-              )}
-            </section>
-          )}
-          {children}
-          <button className="save-plan" type="submit">
-            {plan ? "Save changes" : "Create planned batch"}
-          </button>
-          {plan && (
-            <button
-              type="button"
-              disabled={!members.length}
-              onClick={(event) => {
-                if (removing.length || event.currentTarget.form?.querySelector("input[name=add]:checked")) {
-                  setMessage("Save or discard your membership changes before marking this batch sent.");
-                  return;
-                }
-                if (window.confirm("Mark " + plan.id + " and all " + members.length + " orders as sent?"))
-                  void submit({
-                    kind: "runAction",
-                    action: "send",
-                    origin,
-                    batchId: plan.id,
-                    expectedVersion: plan.version,
-                  });
-              }}
-            >
-              Mark sent
+                        {removing.includes(number) && (
+                          <label className="removal-note">
+                            Reason for removing #{number}
+                            <input required name={"note-" + number} />
+                          </label>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>Planned (empty)</p>
+                )}
+              </section>
+            )}
+            {children}
+            <button className="save-plan" type="submit">
+              {plan ? "Save changes" : "Create planned batch"}
             </button>
-          )}
-          {plan && (
-            <button
-              type="button"
-              className="cancel-plan"
-              onClick={() => {
-                if (window.confirm("Cancel " + plan.id + " and release its orders?"))
-                  void submit({
-                    kind: "deleteBatch",
-                    origin,
-                    batchId: plan.id,
-                    expectedVersion: plan.version,
-                  });
-              }}
-            >
-              Cancel batch
-            </button>
-          )}
-        </fieldset>
-      </form>
+            {plan && (
+              <button
+                type="button"
+                disabled={!members.length}
+                onClick={(event) => {
+                  if (removing.length || event.currentTarget.form?.querySelector("input[name=add]:checked")) {
+                    setMessage("Save or discard your membership changes before marking this batch sent.");
+                    return;
+                  }
+                  if (window.confirm("Mark " + plan.id + " and all " + members.length + " orders as sent?"))
+                    void submit({
+                      kind: "runAction",
+                      action: "send",
+                      origin,
+                      batchId: plan.id,
+                      expectedVersion: plan.version,
+                    });
+                }}
+              >
+                Mark sent
+              </button>
+            )}
+            {plan && (
+              <button
+                type="button"
+                className="cancel-plan"
+                onClick={() => {
+                  if (window.confirm("Cancel " + plan.id + " and release its orders?"))
+                    void submit({
+                      kind: "deleteBatch",
+                      origin,
+                      batchId: plan.id,
+                      expectedVersion: plan.version,
+                    });
+                }}
+              >
+                Cancel batch
+              </button>
+            )}
+          </fieldset>
+        </form>
+      )}
       <p role="status">{message}</p>
       {uncertain && (
         <button disabled={busy} onClick={() => void submit()}>

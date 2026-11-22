@@ -119,6 +119,37 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     expect((await pool.query("select * from handoffs where operation_id=$1", [requests[0]])).rowCount).toBe(
       1,
     );
+    const sentBatch = (await pool.query("select batch_id from handoffs where operation_id=$1", [requests[0]]))
+      .rows[0].batch_id as string;
+    await page.getByRole("link", { name: "East Village", exact: true }).click();
+    await page.getByRole("link", { name: sentBatch, exact: true }).click();
+    await expect(page.getByRole("heading", { name: sentBatch, exact: true })).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: "Did not travel" })).toHaveCount(0);
+    await pool.query("update staff set role='admin' where id=$1", [staff]);
+    await page.reload();
+    await page.getByRole("checkbox", { name: "Did not travel" }).check();
+    await page.getByLabel("Reason for #" + numbers[1]).fill("Stayed at SoHo");
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Record correction" }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Contents changed, confirm before return" }),
+    ).toBeVisible();
+    await expect(page.getByText(/Did not travel · Stayed at SoHo/)).toBeVisible();
+    await pool.query("update staff set role='staff' where id=$1", [staff]);
+    await page.reload();
+    await page.route(
+      "**/api/batches",
+      async (route) => {
+        expect((await route.fetch()).status()).toBe(200);
+        await route.abort();
+      },
+      { times: 1 },
+    );
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "Confirm contents" }).click();
+    await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Robin confirmed no remaining orders/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Confirm contents" })).toHaveCount(0);
   } finally {
     await pool.query("delete from handoffs where staff_id=$1", [staff]);
     await pool.query(

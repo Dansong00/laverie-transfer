@@ -72,6 +72,12 @@ Open **Eligible orders** on the staff profile, select the origin store, and choo
 
 Choose **Mark sent** when the batch leaves. If Cents has closed an order since planning, the app lists its number so staff can remove it with a note before sending. If the phone loses the confirmation, reopening the orders page for that store checks the original departure. **Already saved** confirms that it was recorded.
 
+### Sent-batch contents
+
+On **Eligible orders**, choose the destination store and open a batch under **Sent to**. An admin can record orders that did not travel and give a reason for each. At the receiving store, staff check the remaining orders and choose **Confirm contents** after receipt. Each correction requires a fresh confirmation before return. The history keeps earlier confirmations with their staff member, time and order set.
+
+In the operations ledger, forward transitions use their action name (for example, `send` or `sendReturn`) as `operations.kind`. Other commands use their command name, such as `correctSentMembership` or `confirmContents`.
+
 ## Cents webhook intake
 
 Cents posts order events to `/api/cents/webhook`. Configure one custom header for the business and map the two locations to their Cents store IDs. For the local fixture, use these test values in `.env.local`.

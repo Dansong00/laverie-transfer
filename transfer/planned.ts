@@ -6,8 +6,17 @@ import { batchCounters, batches, batchOrders, centsOrders, handoffs, operations 
 import { getProfile, hasValidSessionToken } from "../staff/session";
 import { BatchError, parseBatchCommand, type BatchChange } from "./commands";
 
+import { changeContents, type Confirmation } from "./contents";
+
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
-type Result = { batchId: string; version: number; cancelled: boolean; sent?: true };
+type Result = {
+  batchId: string;
+  version: number;
+  cancelled: boolean;
+  sent?: true;
+  contents?: true;
+  confirmation?: Confirmation;
+};
 type Outcome = { ok: true; result: Result } | { ok: false; status: number; error: string };
 
 const retained = (batchId: string) => and(eq(batchOrders.batchId, batchId), isNull(batchOrders.removedAt));
@@ -21,6 +30,8 @@ export async function plannedBatches(origin: StoreId) {
       and(
         eq(batches.origin, origin),
         isNull(batches.cancelledAt),
+        eq(batches.contentsChanged, false),
+        isNull(batches.contentsConfirmedAt),
         notExists(
           db
             .select({ id: batchOrders.id })
@@ -131,7 +142,7 @@ async function deleteBatch(tx: Tx, batchId: string, op: string, now: Date) {
 // The caller holds the batch lock and has checked its expected version.
 async function runAction(
   tx: Tx,
-  change: Extract<BatchChange, { kind: "runAction" }>,
+  change: Extract<BatchChange, { action: "send" }>,
   operationId: string,
   staffId: string,
   at: Date,
@@ -171,6 +182,10 @@ async function runAction(
   await tx.update(batchOrders).set({ phase: "sent" }).where(retained(change.batchId));
 }
 
+function isSend(change: BatchChange): change is Extract<BatchChange, { action: "send" }> {
+  return change.kind === "runAction" && change.action === "send";
+}
+
 async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): Promise<Result> {
   if (change.kind === "createBatch") return createBatch(tx, change, op, staffId);
   const [batch] = await tx
@@ -183,17 +198,23 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
   if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
-  if (change.kind === "runAction") {
+  let confirmation: Confirmation | undefined;
+  const sent = isSend(change);
+  const planning = change.kind === "updateBatch" || change.kind === "deleteBatch";
+  if (sent) {
     await runAction(tx, change, op, staffId, now);
-  } else {
+  } else if (planning) {
     const travelling = await tx
       .select({ id: batchOrders.id })
       .from(batchOrders)
       .where(and(retained(batch.id), ne(batchOrders.phase, "planned")))
       .limit(1);
-    if (travelling.length) throw new BatchError(409, "Only unsent batches can be changed.");
+    if (travelling.length || batch.contentsChanged || batch.contentsConfirmedAt)
+      throw new BatchError(409, "Only unsent batches can be changed.");
     if (cancelled) await deleteBatch(tx, batch.id, op, now);
     else await updateBatch(tx, change, op);
+  } else {
+    confirmation = await changeContents(tx, batch, change, op, staffId, now);
   }
   const version = batch.version + 1;
   await tx
@@ -204,7 +225,8 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     batchId: batch.id,
     version,
     cancelled,
-    ...(change.kind === "runAction" && { sent: true as const }),
+    ...(!planning && !sent && { contents: true as const, confirmation }),
+    ...(sent && { sent: true as const }),
   };
 }
 
@@ -252,6 +274,8 @@ export async function saveBatch(token: string | undefined, input: unknown, check
     if (!saved.length) return replay();
     let outcome: Outcome;
     try {
+      if (change.kind === "correctSentMembership" && actor.role !== "admin")
+        throw new BatchError(403, "Admin access required.");
       if (!allowed) throw new BatchError(403, "Staff access required.");
       const result = await tx.transaction((inner) => apply(inner, change, operationId, actor.staffId));
       outcome = { ok: true, result };
