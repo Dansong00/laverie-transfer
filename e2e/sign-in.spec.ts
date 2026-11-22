@@ -39,7 +39,7 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
               ('east_village','E2E-S7-EV','IN_PROGRESS','webhook',now(),now())`,
     );
     await page.getByRole("link", { name: "Eligible orders" }).click();
-    await expect(page.getByRole("link", { name: "SoHo" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "SoHo", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-SO")).toBeVisible();
     await expect(page.getByText("#E2E-S7-EV")).toHaveCount(0);
     await page.getByRole("link", { name: "East Village" }).click();

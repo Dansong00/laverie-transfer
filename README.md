@@ -41,8 +41,8 @@ A healthy database looks like this:
   "ok": true,
   "database": "up",
   "migrationVersion": {
-    "id": 5,
-    "hash": "<sha256 of drizzle/0004_cents_order_identity.sql>",
+    "id": 6,
+    "hash": "<sha256 of drizzle/0005_planned_batch_changes.sql>",
     "createdAt": "<journal timestamp of that migration>"
   }
 }
@@ -65,6 +65,10 @@ At `/`, enter a mobile number and the six-digit code sent by text. US numbers al
 After sign-in, the profile shows the staff member’s name and current role. Admins also see their registered number and a **Staff admin** link. In the directory, admins can register a number, change someone’s role, or disable their access. Disabling a staff member revokes all of their sessions immediately.
 
 Directory changes and their audit records commit together. The server rejects a change that would remove the last active admin, including concurrent changes. Retrying a confirmed change with the same operation ID returns the saved result.
+
+## Planned batches
+
+Open **Eligible orders** on the staff profile, select the origin store, and choose orders to create a planned batch. Open a batch from **Planned batches** to add orders, remove an order with a note, or cancel the batch. Cancellation keeps its history and releases orders that are still eligible for transfer.
 
 ## Cents webhook intake
 
@@ -150,5 +154,5 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 2. Give each Vercel preview its own database: the Neon–Vercel integration (a branch per preview) or a separate non-production database. Do not paste the production connection string into Preview.
 3. Import `Dansong00/laverie-transfer` into Vercel. Framework Next.js, package manager pnpm, Node.js 22. The repo already sets the install and build commands.
 4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
-5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of `0004_cents_order_identity.sql` at `/api/health`.
+5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of `0005_planned_batch_changes.sql` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.
