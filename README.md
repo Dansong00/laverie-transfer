@@ -1,6 +1,6 @@
 # Laverie Transfer
 
-Transfer board for SoHo and East Village staff. The app shell, database migrations, a health check, and CI are in place. Domain tables for Cents orders, batches, handoffs, and staff are migrated. Sign-in and the transfer board come in later slices.
+Transfer board for SoHo and East Village staff. The app shell, database migrations, a health check, and CI are in place. Domain tables for Cents orders, batches, handoffs, and staff are migrated. Staff can sign in by text. The transfer board comes in a later slice.
 
 Next.js (App Router) and TypeScript serve the UI and API. Postgres is the database, via Drizzle and plain SQL migrations. Hosted databases are Neon. Vitest covers unit and database tests. Playwright covers the smoke path. GitHub Actions runs on every pull request.
 
@@ -32,7 +32,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000) for the health result, or [http://127.0.0.1:3000/api/health](http://127.0.0.1:3000/api/health) for the JSON API.
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000) for staff sign-in, or [http://127.0.0.1:3000/api/health](http://127.0.0.1:3000/api/health) for the JSON API.
 
 A healthy database looks like this:
 
@@ -49,6 +49,16 @@ A healthy database looks like this:
 ```
 
 `ok` is true only when `SELECT 1` succeeds. `migrationVersion` is the latest row in `drizzle.__drizzle_migrations`. It is null when that table is not there yet. A database the app cannot reach returns HTTP 503 and `"database": "down"`.
+
+## Staff sign-in
+
+Set `SESSION_SECRET` to a random secret of at least 32 bytes. Set `APP_DOMAIN` to the app hostname, `SMS_PROVIDER_API_KEY` to a Telnyx messaging API key, and `SMS_FROM` to its SMS-enabled sending number. Use environment-specific test credentials and numbers on preview.
+
+For first-time setup, set `BOOTSTRAP_ADMIN_PHONE` to the first admin’s E.164 number and run `pnpm staff:bootstrap` against the intended database. The command refuses if any admin already exists, including a disabled one.
+
+At `/`, enter a mobile number and the six-digit code sent by text. US numbers also accept local formatting. Texts go only to active staff. Codes expire after ten minutes. Staff can request another after 30 seconds, up to five sends per rolling hour. Five incorrect guesses lock that code. A new send replaces the previous code.
+
+`GET /api/session` returns the signed-in staff member’s ID, name, and current role, or HTTP 401. A secure HTTP-only cookie identifies a server-side session. Sessions expire after 30 days or seven idle days. Sign-out revokes the session. Use HTTPS for SMS autofill on supported mobile browsers.
 
 ## Cents webhook intake
 
@@ -131,7 +141,5 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 2. Give each Vercel preview its own database: the Neon–Vercel integration (a branch per preview) or a separate non-production database. Do not paste the production connection string into Preview.
 3. Import `Dansong00/laverie-transfer` into Vercel. Framework Next.js, package manager pnpm, Node.js 22. The repo already sets the install and build commands.
 4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
-5. Deploy a preview. Open `/` and `/api/health`. Expect `ok: true`, `database: "up"`, and migration id `3`.
+5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with migration id `3` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.
-
-Staff sign-in and the transfer board are later slices.
