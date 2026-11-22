@@ -2,7 +2,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import type { StoreId } from "../../db/eligible-orders";
-import type { StoreAction } from "../../transfer/commands";
+import type { PhaseCorrection, StoreAction } from "../../transfer/commands";
 import { useBatchChange } from "../use-batch-change";
 
 const Changes = createContext<ReturnType<typeof useBatchChange> | null>(null);
@@ -46,5 +46,35 @@ export function StoreButton({ command, label }: { command: StoreAction; label: s
     >
       {label}
     </button>
+  );
+}
+
+type CorrectionInput = Omit<PhaseCorrection, "kind" | "reason"> &
+  (
+    | { kind: "correctTravelPhase" }
+    | Pick<Extract<PhaseCorrection, { kind: "stepBackOrder" }>, "kind" | "orderKey">
+  );
+
+export function CorrectionForm({ command, label }: { command: CorrectionInput; label: string }) {
+  const changes = useContext(Changes);
+  if (!changes) throw new Error("Correction controls require BoardChanges");
+  return (
+    <details>
+      <summary>{label}</summary>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const reason = String(new FormData(event.currentTarget).get("reason") ?? "").trim();
+          if (reason) void changes.submit({ ...command, reason });
+        }}
+      >
+        <fieldset disabled={changes.busy || changes.uncertain}>
+          <label>
+            Reason for correction <input name="reason" required pattern=".*\S.*" />
+          </label>
+          <button>Save correction</button>
+        </fieldset>
+      </form>
+    </details>
   );
 }

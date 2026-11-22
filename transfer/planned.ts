@@ -6,6 +6,7 @@ import { batchCounters, batches, batchOrders, centsOrders, handoffs, operations 
 import { getProfile, hasValidSessionToken } from "../staff/session";
 import { BatchError, parseBatchCommand, type BatchChange } from "./commands";
 
+import { reversePhase, type CorrectionRecord } from "./corrections";
 import { advanceAtStore, isStoreAction } from "./processing";
 import { changeContents, type Confirmation } from "./contents";
 
@@ -18,6 +19,7 @@ type Result = {
   board?: true;
   contents?: true;
   confirmation?: Confirmation;
+  correction?: CorrectionRecord;
 };
 type Outcome = { ok: true; result: Result } | { ok: false; status: number; error: string };
 
@@ -200,11 +202,14 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
   if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
+  let correction: CorrectionRecord | undefined;
   let confirmation: Confirmation | undefined;
   const sent = isSend(change);
   const planning = change.kind === "updateBatch" || change.kind === "deleteBatch";
   const board = isStoreAction(change);
-  if (board) {
+  if (change.kind === "stepBackOrder" || change.kind === "correctTravelPhase") {
+    correction = await reversePhase(tx, batch, change, op, staffId, now);
+  } else if (board) {
     await advanceAtStore(tx, batch, change, op, staffId, now);
   } else if (sent) {
     await runAction(tx, change, op, staffId, now);
@@ -230,8 +235,9 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     batchId: batch.id,
     version,
     cancelled,
-    ...(board && { board: true as const }),
-    ...(!board && !planning && !sent && { contents: true as const, confirmation }),
+    ...((board || correction) && { board: true as const }),
+    ...(correction && { correction }),
+    ...(!correction && !board && !planning && !sent && { contents: true as const, confirmation }),
     ...(sent && { sent: true as const }),
   };
 }
@@ -280,7 +286,10 @@ export async function saveBatch(token: string | undefined, input: unknown, check
     if (!saved.length) return replay();
     let outcome: Outcome;
     try {
-      if (change.kind === "correctSentMembership" && actor.role !== "admin")
+      if (
+        (change.kind === "correctSentMembership" || change.kind === "correctTravelPhase") &&
+        actor.role !== "admin"
+      )
         throw new BatchError(403, "Admin access required.");
       if (!allowed) throw new BatchError(403, "Staff access required.");
       const result = await tx.transaction((inner) => apply(inner, change, operationId, actor.staffId));

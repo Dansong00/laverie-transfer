@@ -132,7 +132,9 @@ export function ContentsForm({
               ? "Departure corrected"
               : h.action === "send"
                 ? "Marked sent"
-                : h.action}{" "}
+                : h.reason
+                  ? `Moved back to ${h.toPhase.replaceAll("_", " ")} · ${h.reason}`
+                  : h.action}{" "}
             · {h.name} · {h.at.toISOString()}
           </li>
         ))}

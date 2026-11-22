@@ -1,9 +1,10 @@
-import { and, asc, count, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import type { StoreId } from "../db/eligible-orders";
-import { batches, batchOrders, boardSections, centsOrders, handoffs, staff } from "../db/schema";
+import { batches, batchOrders, boardSections, centsOrders, handoffs, operations, staff } from "../db/schema";
 
-import { receiptRecorded } from "./processing";
+import { correctionReason } from "./corrections";
+import { receiptRecorded, travelPhase } from "./processing";
 
 export type Section = (typeof boardSections)[number];
 export const sectionNames: Record<Section, string> = {
@@ -106,11 +107,11 @@ export async function getBatch(batchId: string) {
   return getDb().transaction(
     async (tx) => {
       const [row] = await tx
-        .select({ batch: batches, received: receiptRecorded(batches.id) })
+        .select({ batch: batches, travel: travelPhase(batches.id) })
         .from(batches)
         .where(eq(batches.id, batchId));
       if (!row) return null;
-      const { batch, received } = row;
+      const { batch, travel } = row;
       const orders = await tx
         .select({ membership: batchOrders, order: centsOrders })
         .from(batchOrders)
@@ -124,14 +125,46 @@ export async function getBatch(batchId: string) {
         .where(and(eq(batchOrders.batchId, batchId), isNull(batchOrders.removedAt)))
         .orderBy(asc(batchOrders.orderNumber));
       const history = await tx
-        .select({ handoff: handoffs, staffName: staff.name })
+        .select({
+          handoff: handoffs,
+          staffName: staff.name,
+          reason: correctionReason,
+        })
         .from(handoffs)
+        .innerJoin(operations, eq(operations.operationId, handoffs.operationId))
         .innerJoin(staff, eq(staff.id, handoffs.staffId))
         .where(eq(handoffs.batchId, batchId))
         .orderBy(asc(handoffs.at), asc(handoffs.orderNumber), asc(handoffs.id));
+      // Empty batches have no order handoffs. Keep their corrections visible too.
+      const emptyCorrections = await tx
+        .select({
+          operationId: operations.operationId,
+          at: operations.createdAt,
+          staffName: staff.name,
+          reason: correctionReason,
+          fromPhase: sql<string>`${operations.result} #>> '{result,correction,fromPhase}'`,
+          toPhase: sql<string>`${operations.result} #>> '{result,correction,toPhase}'`,
+        })
+        .from(operations)
+        .innerJoin(staff, eq(staff.id, operations.staffId))
+        .where(
+          and(
+            eq(operations.batchId, batchId),
+            eq(operations.kind, "correctTravelPhase"),
+            sql`${operations.result} #>> '{result,correction,orderCount}' = '0'`,
+          ),
+        )
+        .orderBy(asc(operations.createdAt));
       const phases: Counts = {};
       for (const { membership } of orders) phases[membership.phase] = (phases[membership.phase] ?? 0) + 1;
-      return { batch, orders, history, ...summarize(batch, phases, received) };
+      return {
+        batch,
+        orders,
+        history,
+        emptyCorrections,
+        travel,
+        ...summarize(batch, phases, travel === "received"),
+      };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );

@@ -7,7 +7,7 @@ import { boardSections } from "../../db/schema";
 import { readSession, sessionCookie } from "../../staff/session";
 import { getStaffPreferences } from "../../staff/preferences";
 import { getBatch, listBatchesForStore, sectionNames } from "../../transfer/board";
-import { BoardChanges, StoreButton } from "./store-actions";
+import { BoardChanges, CorrectionForm, StoreButton } from "./store-actions";
 import type { StoreId } from "../../db/eligible-orders";
 import { BoardRefresh, SectionFilter } from "./controls";
 import "../sign-in.css";
@@ -60,7 +60,7 @@ async function Board({ searchParams }: PageProps<"/board">) {
       {query.saved === "again" && <p role="status">Already saved.</p>}
       <BoardChanges key={actor.staffId + store} staffId={actor.staffId} store={store}>
         {query.batch ? (
-          <BatchDetail id={query.batch} store={store} />
+          <BatchDetail id={query.batch} store={store} admin={actor.role === "admin"} />
         ) : (
           <Sections store={store} staffId={actor.staffId} />
         )}
@@ -98,7 +98,9 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
                     <span>
                       {card.total === 0 && section === "planned"
                         ? "Planned (empty)"
-                        : (section === "received" && card.ready > 0) || section === "processing" || section === "ready_for_return"
+                        : (section === "received" && card.ready > 0) ||
+                            section === "processing" ||
+                            section === "ready_for_return"
                           ? `${card.ready} of ${card.total} ready`
                           : `${card.total} ${card.total === 1 ? "order" : "orders"}`}
                     </span>
@@ -129,7 +131,7 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
   );
 }
 
-async function BatchDetail({ id, store }: { id: string; store: keyof typeof stores }) {
+async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; admin: boolean }) {
   const detail = await getBatch(id);
   if (!detail || ![detail.origin, detail.destination].includes(store)) notFound();
   const { section, orders, history } = detail;
@@ -142,6 +144,13 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
     .filter(({ membership }) => membership.active && membership.phase === "processing")
     .map(({ order }) => ({ storeId: origin, orderNumber: order.orderNumber }));
   const atDestination = detail.destination === store && !detail.batch.cancelledAt;
+  const correction = { origin, batchId: id, expectedVersion: detail.version };
+  const travel = detail.travel;
+  const canCorrectTravel =
+    admin &&
+    !detail.batch.cancelledAt &&
+    (travel === "sent" || travel === "received") &&
+    orders.every(({ membership }) => membership.active && membership.phase === travel);
   return (
     <section className="batch-detail">
       <h2>{id}</h2>
@@ -160,6 +169,13 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
         )}
       {atDestination && section === "arriving" && (
         <StoreButton label="Mark received" command={{ ...command, action: "receive" }} />
+      )}
+      {canCorrectTravel && (
+        <CorrectionForm
+          key={detail.version}
+          command={{ ...correction, kind: "correctTravelPhase" }}
+          label={travel === "sent" ? "Move batch back to Planned" : "Move batch back to Sent"}
+        />
       )}
       <h3>Orders</h3>
       {orders.length ? (
@@ -188,6 +204,23 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
                   }}
                 />
               )}
+              {atDestination &&
+                membership.active &&
+                ["processing", "ready_for_return"].includes(membership.phase) && (
+                  <CorrectionForm
+                    key={detail.version}
+                    label={
+                      membership.phase === "processing"
+                        ? "Move order back to Received"
+                        : "Move order back to Processing"
+                    }
+                    command={{
+                      ...correction,
+                      kind: "stepBackOrder",
+                      orderKey: { storeId: origin, orderNumber: order.orderNumber },
+                    }}
+                  />
+                )}
               {order.isPersonalDetergent && <small>Personal detergent</small>}
             </li>
           ))}
@@ -207,15 +240,34 @@ async function BatchDetail({ id, store }: { id: string; store: keyof typeof stor
           command={{ ...command, action: "markReady", orderKeys: processing }}
         />
       )}
+      {detail.emptyCorrections.length > 0 && (
+        <section>
+          <h3>Empty batch corrections</h3>
+          <ol>
+            {detail.emptyCorrections.map((c) => (
+              <li key={c.operationId}>
+                {phaseNames[c.fromPhase]} → {phaseNames[c.toPhase]} · {c.reason}
+                <small>
+                  {c.staffName} · {localTime.format(c.at)}
+                </small>
+                <small>Operation {c.operationId}</small>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       <h3>Handoff history</h3>
       {history.length ? (
         <ol>
-          {history.map(({ handoff, staffName }) => (
+          {history.map(({ handoff, staffName, reason }) => (
             <li key={handoff.id}>
               <strong>#{handoff.orderNumber}</strong>{" "}
               {handoff.action === "correctSentMembership"
                 ? "Did not travel"
-                : (phaseNames[handoff.toPhase] ?? handoff.toPhase)}
+                : reason
+                  ? `${phaseNames[handoff.fromPhase]} → ${phaseNames[handoff.toPhase]}`
+                  : (phaseNames[handoff.toPhase] ?? handoff.toPhase)}
+              {reason && <small>Reason: {reason}</small>}
               <small>
                 {staffName} · <time dateTime={handoff.at.toISOString()}>{localTime.format(handoff.at)}</time>
               </small>
