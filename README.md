@@ -41,8 +41,8 @@ A healthy database looks like this:
   "ok": true,
   "database": "up",
   "migrationVersion": {
-    "id": 4,
-    "hash": "<sha256 of drizzle/0003_open_transfer_statuses.sql>",
+    "id": 5,
+    "hash": "<sha256 of drizzle/0004_cents_order_identity.sql>",
     "createdAt": "<journal timestamp of that migration>"
   }
 }
@@ -89,6 +89,21 @@ Use `cents_status_allows_transfer(status)` for the Cents part of an eligibility 
 
 Unknown stores are recorded for review. Unrelated event types are acknowledged and skipped.
 
+## Import a Cents Orders report
+
+Run the import against the same database and `CENTS_STORE_ALLOWLIST` used by webhook intake. The provisional CSV format must include `Order Code`, `Location`, and `Status`. The first stored ticket spelling is preserved. Both writers trim surrounding whitespace and match digit-only codes regardless of zero padding within the same store. Alphanumeric codes retain their case and internal zeros. Location can be a configured Cents store ID or a store name such as `SoHo`, `Laverie SoHo`, or `East Village`.
+
+```bash
+pnpm cents:backfill --dry-run /path/to/orders.csv
+pnpm cents:backfill /path/to/orders.csv
+```
+
+The optional `Due Date` accepts ISO dates, US month/day/year dates, and timestamps. Both writers store date-only values at midnight UTC. Unzoned times use America/New_York. Optional first and last name columns contribute only a first name and last initial. The importer discards other customer fields and leaves the personal-detergent flag unset pending confirmation of the modifier name.
+
+At go-live, enable and verify the webhook, then generate a fresh export, dry-run it, and import it promptly. Verify real headers, statuses, order codes and date semantics using the [first-import runbook](docs/cents-orders-go-live.md).
+
+Each row commits independently. The command reports inserted and already-present counts. If it stops on an invalid record, correct the file and run it again. An existing order keeps its snapshot. A newer webhook can supersede a backfilled order, and a backfilled terminal order stays ineligible if a later webhook tries to reopen it.
+
 ## Checks
 
 ```bash
@@ -101,7 +116,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-`pnpm test` is Vitest and talks to the Postgres database in `DATABASE_URL`. The staff auth and directory suites create, migrate, and drop a disposable database per suite. Use a local or CI test role with `CREATEDB` for these tests. `pnpm test:e2e` starts `pnpm start`, so build first. CI does this against a Postgres service container and needs no repository secrets.
+`pnpm test` runs Vitest against Postgres using `DATABASE_URL`. The Cents webhook, Cents backfill, staff auth, and staff directory suites each create, migrate, and drop a disposable database. Use a local or CI test role with `CREATEDB`. `pnpm test:e2e` starts `pnpm start`, so build first. CI does this against a Postgres service container and needs no repository secrets.
 
 ## Scripts
 
@@ -135,5 +150,5 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 2. Give each Vercel preview its own database: the Neon–Vercel integration (a branch per preview) or a separate non-production database. Do not paste the production connection string into Preview.
 3. Import `Dansong00/laverie-transfer` into Vercel. Framework Next.js, package manager pnpm, Node.js 22. The repo already sets the install and build commands.
 4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
-5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with migration id `4` at `/api/health`.
+5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of `0004_cents_order_identity.sql` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.

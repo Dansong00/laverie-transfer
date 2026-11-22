@@ -79,6 +79,7 @@ export const centsOrders = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.storeId, table.orderNumber] }),
+    uniqueIndex("cents_orders_store_identity_idx").on(table.storeId, sql`cents_order_identity(${table.orderNumber})`),
   ],
 );
 

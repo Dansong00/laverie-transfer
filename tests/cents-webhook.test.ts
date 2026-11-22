@@ -1,9 +1,9 @@
-import pg from "pg";
-import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { setupCentsTestDatabase } from "./helpers/cents-database";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { POST } from "../app/api/cents/webhook/route";
 import fixture from "../fixtures/order-created.json";
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = setupCentsTestDatabase();
 const secret = "fixture-only";
 const request = (body: unknown, key: string | null = secret) =>
   new Request("https://example.test/api/cents/webhook", {
@@ -18,12 +18,8 @@ beforeAll(() => {
   vi.stubEnv("CENTS_WEBHOOK_HEADER_SECRET", secret);
   vi.stubEnv("CENTS_STORE_ALLOWLIST", '{"soho":101,"east_village":102}');
 });
-beforeEach(async () => {
-  await pool.query("delete from cents_orders; delete from cents_raw_events");
-});
 afterAll(async () => {
   vi.unstubAllEnvs();
-  await pool.end();
 });
 
 test.each([null, "wrong"])("rejects invalid header %s before storing", async key => {

@@ -29,6 +29,13 @@
       "when": 1795365764908,
       "tag": "0003_open_transfer_statuses",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795366911673,
+      "tag": "0004_cents_order_identity",
+      "breakpoints": true
     }
   ]
 }

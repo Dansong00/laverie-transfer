@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { getDb } from "../db/client";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { customerName, mappedStatus, orderCode, orderLock, storeMapping } from "./order-fields";
+import { parseOrderDueDate } from "./report-date";
 import { applyCentsEvent, sourceTimestamp } from "./snapshot";
 import { centsOrders, centsRawEvents } from "../db/schema";
 
@@ -42,26 +44,9 @@ function redactBody(event: string, order: Record<string, unknown>, payload: Reco
         ? service.modifiers.filter(isObject).map(m => scalarFields(m, modifierFields))
         : undefined,
     })) : undefined,
-    customer: isObject(payload.customer) ? {
-      firstName: typeof payload.customer.firstName === "string" ? payload.customer.firstName : undefined,
-      lastInitial: typeof payload.customer.lastName === "string"
-        ? Array.from(payload.customer.lastName.trim())[0] : undefined,
-    } : undefined,
+    customer: isObject(payload.customer)
+      ? customerName(payload.customer.firstName, payload.customer.lastName) : undefined,
   };
-}
-
-function storeMapping() {
-  const raw: unknown = JSON.parse(process.env.CENTS_STORE_ALLOWLIST ?? "");
-  if (!isObject(raw)) throw new Error("Invalid Cents store mapping");
-  const mapping = new Map<string, string>();
-  for (const store of ["soho", "east_village"]) {
-    const id = raw[store];
-    if ((typeof id !== "string" && typeof id !== "number") || !String(id).trim() || mapping.has(String(id))) {
-      throw new Error("Invalid Cents store mapping");
-    }
-    mapping.set(String(id), store);
-  }
-  return mapping;
 }
 
 export class InvalidCentsEvent extends Error {}
@@ -98,16 +83,17 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
   const stores = storeMapping();
   const store = storeHint === null ? undefined : stores.get(storeHint);
   const order = body.order;
-  const orderNumber = identifier(order.orderCode);
-  const status = typeof order.status === "string" ? order.status.trim() : "";
+  const orderNumber = orderCode(order.orderCode);
+  const status = typeof order.status === "string" ? (mappedStatus(order.status) ?? order.status.trim()) : "";
   const time = sourceTimestamp(order.updatedAt);
-  const dueAt = typeof order.dueDate === "string" ? new Date(order.dueDate) : null;
+  const date = typeof order.dueDate === "string" ? order.dueDate.trim() : "";
+  const legacyDate = new Date(date);
+  const dueAt = parseOrderDueDate(date) ?? (Number.isFinite(+legacyDate) ? legacyDate : null);
 
   const result = await getDb().transaction(async tx => {
     // Serialize first inserts too: a row lock cannot lock a missing snapshot.
     // Identical fingerprints also share this key, including malformed receipts.
-    const key = JSON.stringify([storeHint, orderNumber]);
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    await tx.execute(orderLock(storeHint, orderNumber));
     const [original] = await tx.select({ id: centsRawEvents.id })
       .from(centsRawEvents).where(eq(centsRawEvents.fingerprint, fingerprint))
       .orderBy(asc(centsRawEvents.id)).limit(1);
@@ -125,12 +111,19 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
     if (original) return { stored, effect: "duplicate", reviewReason };
     if (!store || !time || !orderNumber || !status) return { stored, effect: "needs_review", reviewReason };
 
-    const orderKey = and(eq(centsOrders.storeId, store), eq(centsOrders.orderNumber, orderNumber));
+    const orderKey = and(eq(centsOrders.storeId, store), sql`cents_order_identity(${centsOrders.orderNumber}) = cents_order_identity(${orderNumber})`);
     const [current] = await tx.select({
+      centsOrderId: centsOrders.centsOrderId,
       status: centsOrders.status,
       sourceUpdatedAt: sql<string | null>`to_char(${centsOrders.sourceUpdatedAt} at time zone 'UTC',
         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     }).from(centsOrders).where(orderKey).for("update");
+    const centsOrderId = identifier(order.id);
+    if (current?.centsOrderId && centsOrderId && current.centsOrderId !== centsOrderId) {
+      await tx.update(centsRawEvents).set({ needsReview: true, reviewReason: "conflicting_order_id" })
+        .where(eq(centsRawEvents.id, stored));
+      return { stored, effect: "needs_review", reviewReason: "conflicting_order_id" };
+    }
     const effect = applyCentsEvent(current, { status, sourceUpdatedAt: time });
     if (effect === "needs_review") {
       reviewReason = "reopen";
@@ -139,8 +132,8 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
     }
     if (effect === "applied") {
       const values = {
-        status, centsOrderId: identifier(order.id),
-        dueAt: dueAt && Number.isFinite(dueAt.getTime()) ? dueAt : null,
+        status, centsOrderId: centsOrderId ?? current?.centsOrderId ?? null,
+        dueAt,
         customerFirstName: body.customer?.firstName ?? null,
         customerLastInitial: body.customer?.lastInitial ?? null,
         source: "webhook", sourceUpdatedAt: sql`${time}::timestamptz`,
