@@ -41,8 +41,8 @@ A healthy database looks like this:
   "ok": true,
   "database": "up",
   "migrationVersion": {
-    "id": 4,
-    "hash": "<sha256 of drizzle/0003_cents_order_identity.sql>",
+    "id": 5,
+    "hash": "<sha256 of drizzle/0004_cents_order_identity.sql>",
     "createdAt": "<journal timestamp of that migration>"
   }
 }
@@ -85,7 +85,7 @@ pnpm db:show raw-events
 
 The sender targets loopback on port 3000 or the local `PORT` setting. The webhook returns 200 after the insert commits. Each delivery gets a raw row. Repeated fingerprints point to the first receipt. S3 applies newer webhook data to the store-scoped order snapshot. On a timestamp tie a terminal status wins over an open one. A later attempt to reopen a terminal order is recorded for review.
 
-Use `cents_status_allows_transfer(status)` for the Cents part of an eligibility query. Postgres also checks the status when adding a batch membership. Existing memberships keep their transfer phase if Cents completes or cancels their order.
+Use `cents_status_allows_transfer(status)` for the Cents part of an eligibility query. Postgres uses the same rule when adding a batch membership. Open statuses are `SUBMITTED`, `IN_PROGRESS`, and `READY_FOR_PICKUP`. The check ignores case and surrounding spaces. All other statuses are ineligible. Existing memberships keep their transfer phase if Cents completes or cancels their order.
 
 Unknown stores are recorded for review. Unrelated event types are acknowledged and skipped.
 
@@ -150,5 +150,5 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 2. Give each Vercel preview its own database: the Neon–Vercel integration (a branch per preview) or a separate non-production database. Do not paste the production connection string into Preview.
 3. Import `Dansong00/laverie-transfer` into Vercel. Framework Next.js, package manager pnpm, Node.js 22. The repo already sets the install and build commands.
 4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
-5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with migration id `4` at `/api/health`.
+5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of `0004_cents_order_identity.sql` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.

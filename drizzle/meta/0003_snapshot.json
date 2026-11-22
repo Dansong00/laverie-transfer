@@ -1,5 +1,5 @@
 {
-  "id": "5516a935-0aaa-4132-9b21-cd06973b93db",
+  "id": "b8313ddf-d7d0-4fba-b9f9-95b7b3242079",
   "prevId": "90b29a4b-3407-4ee7-bf5c-b7b43f23f044",
   "version": "7",
   "dialect": "postgresql",
@@ -119,10 +119,10 @@
             }
           ],
           "isUnique": true,
-          "where": "active",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "active",
+          "concurrently": false
         },
         "batch_orders_one_retained_membership": {
           "name": "batch_orders_one_retained_membership",
@@ -141,68 +141,68 @@
             }
           ],
           "isUnique": true,
-          "where": "removed_at is null",
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "where": "removed_at is null",
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "batch_orders_added_by_op_operations_operation_id_fk": {
           "name": "batch_orders_added_by_op_operations_operation_id_fk",
           "tableFrom": "batch_orders",
-          "tableTo": "operations",
           "columnsFrom": [
             "added_by_op"
           ],
+          "tableTo": "operations",
           "columnsTo": [
             "operation_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "batch_orders_removed_by_op_operations_operation_id_fk": {
           "name": "batch_orders_removed_by_op_operations_operation_id_fk",
           "tableFrom": "batch_orders",
-          "tableTo": "operations",
           "columnsFrom": [
             "removed_by_op"
           ],
+          "tableTo": "operations",
           "columnsTo": [
             "operation_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "batch_orders_order_fkey": {
           "name": "batch_orders_order_fkey",
           "tableFrom": "batch_orders",
-          "tableTo": "cents_orders",
           "columnsFrom": [
             "store_id",
             "order_number"
           ],
+          "tableTo": "cents_orders",
           "columnsTo": [
             "store_id",
             "order_number"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "batch_orders_batch_origin_fkey": {
           "name": "batch_orders_batch_origin_fkey",
           "tableFrom": "batch_orders",
-          "tableTo": "batches",
           "columnsFrom": [
             "batch_id",
             "origin_store_id"
           ],
+          "tableTo": "batches",
           "columnsTo": [
             "id",
             "origin"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -288,39 +288,39 @@
         "batches_created_by_staff_id_fk": {
           "name": "batches_created_by_staff_id_fk",
           "tableFrom": "batches",
-          "tableTo": "staff",
           "columnsFrom": [
             "created_by"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "batches_contents_confirmed_by_staff_id_fk": {
           "name": "batches_contents_confirmed_by_staff_id_fk",
           "tableFrom": "batches",
-          "tableTo": "staff",
           "columnsFrom": [
             "contents_confirmed_by"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "batches_id_origin": {
           "name": "batches_id_origin",
-          "nullsNotDistinct": false,
           "columns": [
             "id",
             "origin"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -410,42 +410,20 @@
           "notNull": true
         }
       },
-      "indexes": {
-        "cents_orders_store_identity_idx": {
-          "name": "cents_orders_store_identity_idx",
-          "columns": [
-            {
-              "expression": "store_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "cents_order_identity(\"order_number\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "cents_orders_last_event_id_cents_raw_events_id_fk": {
           "name": "cents_orders_last_event_id_cents_raw_events_id_fk",
           "tableFrom": "cents_orders",
-          "tableTo": "cents_raw_events",
           "columnsFrom": [
             "last_event_id"
           ],
+          "tableTo": "cents_raw_events",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -528,9 +506,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         },
         "cents_raw_events_received_at_idx": {
           "name": "cents_raw_events_received_at_idx",
@@ -543,24 +521,24 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
         "cents_raw_events_duplicate_of_fkey": {
           "name": "cents_raw_events_duplicate_of_fkey",
           "tableFrom": "cents_raw_events",
-          "tableTo": "cents_raw_events",
           "columnsFrom": [
             "duplicate_of"
           ],
+          "tableTo": "cents_raw_events",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -646,41 +624,41 @@
         "handoffs_operation_id_operations_operation_id_fk": {
           "name": "handoffs_operation_id_operations_operation_id_fk",
           "tableFrom": "handoffs",
-          "tableTo": "operations",
           "columnsFrom": [
             "operation_id"
           ],
+          "tableTo": "operations",
           "columnsTo": [
             "operation_id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "handoffs_staff_id_staff_id_fk": {
           "name": "handoffs_staff_id_staff_id_fk",
           "tableFrom": "handoffs",
-          "tableTo": "staff",
           "columnsFrom": [
             "staff_id"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         },
         "handoffs_corrects_fkey": {
           "name": "handoffs_corrects_fkey",
           "tableFrom": "handoffs",
-          "tableTo": "handoffs",
           "columnsFrom": [
             "corrects"
           ],
+          "tableTo": "handoffs",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -741,15 +719,15 @@
         "operations_staff_id_staff_id_fk": {
           "name": "operations_staff_id_staff_id_fk",
           "tableFrom": "operations",
-          "tableTo": "staff",
           "columnsFrom": [
             "staff_id"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -857,9 +835,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {},
@@ -916,15 +894,15 @@
         "sessions_staff_id_staff_id_fk": {
           "name": "sessions_staff_id_staff_id_fk",
           "tableFrom": "sessions",
-          "tableTo": "staff",
           "columnsFrom": [
             "staff_id"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -988,10 +966,10 @@
       "uniqueConstraints": {
         "staff_phone_unique": {
           "name": "staff_phone_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "phone"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -1021,15 +999,15 @@
         "staff_preferences_staff_id_staff_id_fk": {
           "name": "staff_preferences_staff_id_staff_id_fk",
           "tableFrom": "staff_preferences",
-          "tableTo": "staff",
           "columnsFrom": [
             "staff_id"
           ],
+          "tableTo": "staff",
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
+          "onUpdate": "no action",
+          "onDelete": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1041,10 +1019,10 @@
   },
   "enums": {},
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},
