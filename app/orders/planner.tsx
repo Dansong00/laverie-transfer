@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { StoreId } from "../../db/eligible-orders";
 import type { BatchChange } from "../../transfer/commands";
 
@@ -21,66 +21,74 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
   const pending = useRef(false);
   const prefix = `planned-batch:${staffId}:${origin}:`;
 
-  const submit = useCallback(
-    async (change?: BatchChange) => {
-      if (pending.current) return;
-      pending.current = true;
-      let navigating = false;
-      try {
-        // Each operation owns its storage entry, including when two tabs submit together.
-        const outstanding = Object.keys(localStorage).find((item) => item.startsWith(prefix));
-        if (change && outstanding) {
-          setUncertain(true);
-          setMessage("Check the pending change before starting another.");
-          return;
-        }
-        const operationId = crypto.randomUUID();
-        const key = outstanding ?? prefix + operationId;
-        const body = change ? JSON.stringify({ operationId, ...change }) : localStorage.getItem(key);
-        if (!body) return;
-        if (change) localStorage.setItem(key, body);
-        setBusy(true);
-        const response = await fetch("/api/batches", {
-          method: "POST",
-          signal: AbortSignal.timeout(15_000),
-          headers: { "content-type": "application/json" },
-          body,
-        });
-        if (response.status >= 500) throw new Error("Unconfirmed");
-        const result = await response.json();
-        if (response.status === 401) {
-          navigating = true;
-          window.location.replace("/");
-          return;
-        }
-        localStorage.removeItem(key);
-        setUncertain(false);
-        if (!response.ok) {
-          setMessage(result.error);
-          return;
-        }
-        const params = new URLSearchParams({ store: origin });
-        if (!result.result.cancelled) params.set("batch", result.result.batchId);
-        if (result.replayed) params.set("saved", "again");
-        navigating = true;
-        window.location.replace("/orders?" + params);
-      } catch {
+  async function submit(change?: BatchChange) {
+    if (pending.current) return;
+    pending.current = true;
+    let navigating = false;
+    try {
+      // Each operation owns its storage entry, including when two tabs submit together.
+      const outstanding = Object.keys(localStorage).find((item) => item.startsWith(prefix));
+      if (change && outstanding) {
         setUncertain(true);
-        setMessage("Not confirmed yet. Retry to check this change.");
-      } finally {
-        if (!navigating) {
-          pending.current = false;
-          setBusy(false);
-        }
+        setMessage("Check the pending change before starting another.");
+        return;
       }
-    },
-    [prefix, origin],
-  );
+      const operationId = crypto.randomUUID();
+      const key = outstanding ?? prefix + operationId;
+      const body = change ? JSON.stringify({ operationId, ...change }) : localStorage.getItem(key);
+      if (!body) {
+        setUncertain(false);
+        setMessage("");
+        return;
+      }
+      if (change) localStorage.setItem(key, body);
+      setBusy(true);
+      const response = await fetch("/api/batches", {
+        method: "POST",
+        signal: AbortSignal.timeout(15_000),
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      if (response.status >= 500) throw new Error("Unconfirmed");
+      if (response.status === 401) {
+        // A fresh request was rejected before any write. A retry could have committed earlier.
+        if (change) localStorage.removeItem(key);
+        navigating = true;
+        window.location.replace("/");
+        return;
+      }
+      const result = await response.json();
+      localStorage.removeItem(key);
+      setUncertain(false);
+      if (!response.ok) {
+        setMessage(result.error);
+        return;
+      }
+      const params = new URLSearchParams({ store: origin });
+      if (!result.result.cancelled) params.set("batch", result.result.batchId);
+      if (result.replayed) params.set("saved", "again");
+      navigating = true;
+      window.location.replace("/orders?" + params);
+    } catch {
+      setUncertain(true);
+      setMessage("Not confirmed yet. Retry to check this change.");
+    } finally {
+      if (!navigating) {
+        pending.current = false;
+        setBusy(false);
+      }
+    }
+  }
 
   useEffect(() => {
-    const recovery = window.setTimeout(() => void submit(), 0);
+    const recovery = window.setTimeout(() => {
+      if (Object.keys(localStorage).some((key) => key.startsWith(prefix))) {
+        setUncertain(true);
+        setMessage("A previous batch change is unconfirmed. Checking it can finish the save.");
+      }
+    }, 0);
     return () => window.clearTimeout(recovery);
-  }, [submit]);
+  }, [prefix]);
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -38,6 +38,17 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     ]);
     await page.goto("/orders?store=soho");
     await page.getByRole("checkbox", { name: "#" + numbers[0] }).check();
+    const cookies = await context.cookies();
+    await context.clearCookies();
+    await page.getByRole("button", { name: "Create planned batch" }).click();
+    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+    const pendingKeys = () =>
+      page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("planned-batch:")));
+    expect(await pendingKeys()).toEqual([]);
+    await context.addCookies(cookies);
+    await page.goto("/orders?store=soho");
+    await page.getByRole("checkbox", { name: "#" + numbers[0] }).check();
+    expect((await pool.query("select id from batches where created_by=$1", [staff])).rowCount).toBe(0);
     await page.route(
       "**/api/batches",
       async (route) => {
@@ -49,12 +60,12 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     );
     await page.getByRole("button", { name: "Create planned batch" }).click();
     await expect(page.getByText("Not confirmed yet.", { exact: false })).toBeVisible();
-    const cookies = await context.cookies();
     await context.clearCookies();
     await page.getByRole("button", { name: "Check pending change" }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     await context.addCookies(cookies);
     await page.goto("/orders?store=soho");
+    await page.getByRole("button", { name: "Check pending change" }).click();
     await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^SOHO-B/ })).toBeVisible();
     await page.getByRole("checkbox", { name: "Remove", exact: true }).check();
