@@ -101,7 +101,7 @@ pnpm exec playwright install chromium
 pnpm test:e2e
 ```
 
-`pnpm test` is Vitest and talks to the Postgres database in `DATABASE_URL`. `pnpm test:e2e` starts `pnpm start`, so build first. CI does this against a Postgres service container and needs no repository secrets.
+`pnpm test` is Vitest and talks to the Postgres database in `DATABASE_URL`. The staff auth and directory suites create, migrate, and drop a disposable database per suite. Use a local or CI test role with `CREATEDB` for these tests. `pnpm test:e2e` starts `pnpm start`, so build first. CI does this against a Postgres service container and needs no repository secrets.
 
 ## Scripts
 

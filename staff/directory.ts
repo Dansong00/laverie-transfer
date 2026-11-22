@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { operations, sessions, staff } from "../db/schema";
-import { getProfile } from "./session";
+import { getProfile, hasValidSessionToken } from "./session";
 import { normalizePhone } from "./settings";
 
 export class DirectoryError extends Error {
@@ -65,7 +65,7 @@ async function requireAdmin(token: string | undefined, tx: Transaction) {
 }
 
 export async function readDirectory(token: string | undefined) {
-  if (!token) throw new DirectoryError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "Sign in required.");
   return getDb().transaction(async (tx) => {
     await tx.execute(sql`lock table staff in share mode`);
     const actorId = await requireAdmin(token, tx);
@@ -140,7 +140,7 @@ async function applyChange(tx: Transaction, change: StaffChange) {
 }
 
 export async function saveStaffChange(token: string | undefined, input: unknown) {
-  if (!token) throw new DirectoryError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "Sign in required.");
   return getDb().transaction(async (tx) => {
     // Shared with first-admin bootstrap. Serialize directory edits before checking
     // the actor, counting other admins, or changing staff and session rows.

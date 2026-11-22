@@ -1,24 +1,16 @@
 import { randomUUID } from "node:crypto";
-import pg from "pg";
+import { setupStaffTestDatabase } from "./helpers/staff-database";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
+import { getDb } from "../db/client";
 import { listStaff, saveStaffChange } from "../staff/directory";
 import { getProfile, readSession, sessionToken } from "../staff/session";
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = setupStaffTestDatabase();
 const numbers = ["+12125550181", "+12125550182", "+12125550183"];
-async function clean() {
-  const targets = "select id from staff where phone=any($1)";
-  await pool.query(`delete from operations where staff_id in (${targets})`, [numbers]);
-  await pool.query(`delete from sessions where staff_id in (${targets})`, [numbers]);
-  await pool.query("delete from staff where phone=any($1)", [numbers]);
-}
 beforeEach(async () => {
-  await clean();
   vi.stubEnv("SESSION_SECRET", "directory-test-only-secret-at-least-32-bytes");
 });
-afterAll(async () => {
-  await clean();
-  await pool.end();
+afterAll(() => {
   vi.unstubAllEnvs();
 });
 
@@ -36,6 +28,17 @@ async function account(role: "staff" | "admin", index: number) {
   );
   return { id, token: sessionToken(sessionId) };
 }
+
+test("directory reads and writes reject invalid tokens before accessing Postgres", async () => {
+  const db = vi.mocked(getDb);
+  db.mockClear();
+  const invalidSignature = randomUUID() + "." + "0".repeat(64);
+  for (const token of [undefined, "malformed", invalidSignature]) {
+    await expect(listStaff(token)).rejects.toMatchObject({ status: 401 });
+    await expect(saveStaffChange(token, {})).rejects.toMatchObject({ status: 401 });
+  }
+  expect(db).not.toHaveBeenCalled();
+});
 
 test("profile redacts phones for staff and directory reads and writes require an admin session", async () => {
   const person = await account("staff", 0);

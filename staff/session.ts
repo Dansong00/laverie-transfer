@@ -16,6 +16,10 @@ function sessionId(token: string | undefined) {
   return parts[1];
 }
 
+export function hasValidSessionToken(token: string | undefined) {
+  return sessionId(token) !== null;
+}
+
 export async function getProfile(token: string | undefined, db?: Pick<ReturnType<typeof getDb>, "update">) {
   const id = sessionId(token);
   if (!id) return null;

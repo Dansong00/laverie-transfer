@@ -1,10 +1,10 @@
-import pg from "pg";
+import { setupStaffTestDatabase } from "./helpers/staff-database";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { requestSignInCode, verifySignInCode } from "../staff/codes";
 import { readSession, revokeSession } from "../staff/session";
 import { bootstrapFirstAdmin } from "../scripts/bootstrap-admin.mjs";
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = setupStaffTestDatabase();
 const phone = "+12125550171";
 const unknown = "+12125550172";
 let code = "";
@@ -16,16 +16,7 @@ const sms = vi.fn(async (_url: string, options: RequestInit) => {
   return new Response(null, { status: 202 });
 });
 
-async function clearFixtures() {
-  const numbers = [phone, unknown];
-  await pool.query("delete from sessions using staff where sessions.staff_id=staff.id and staff.phone=any($1)", [numbers]);
-  await pool.query("delete from otp_codes where phone=any($1)", [numbers]);
-  await pool.query("delete from otp_requests where phone=any($1)", [numbers]);
-  await pool.query("delete from staff where phone=any($1)", [numbers]);
-}
-
 beforeEach(async () => {
-  await clearFixtures();
   await pool.query("insert into staff(name,phone,role,created_at) values ('Test staff',$1,'staff',now())", [phone]);
   vi.stubEnv("SESSION_SECRET", "integration-test-only-secret-at-least-32-bytes");
   vi.stubEnv("SMS_PROVIDER_API_KEY", "test");
@@ -36,9 +27,7 @@ beforeEach(async () => {
   sms.mockClear();
   code = "";
 });
-afterAll(async () => {
-  await clearFixtures();
-  await pool.end();
+afterAll(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
