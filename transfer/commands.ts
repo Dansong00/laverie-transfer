@@ -2,9 +2,15 @@ import type { StoreId } from "../db/eligible-orders";
 
 type Existing = { batchId: string; expectedVersion: number };
 type Removal = { orderNumber: string; note: string };
+export type OrderKey = { storeId: StoreId; orderNumber: string };
+type Correction = { orderKey: OrderKey; reason: string };
 export type BatchChange =
   | { kind: "createBatch"; origin: StoreId; add: string[] }
   | ({ kind: "updateBatch"; origin: StoreId; add: string[]; remove: Removal[] } & Existing)
+  | ({ kind: "runAction"; action: "send"; origin: StoreId } & Existing)
+  | ({ kind: "runAction"; action: "sendReturn"; origin: StoreId; store: StoreId } & Existing)
+  | ({ kind: "confirmContents"; origin: StoreId; store: StoreId } & Existing)
+  | ({ kind: "correctSentMembership"; origin: StoreId; remove: Correction[] } & Existing)
   | ({ kind: "deleteBatch"; origin: StoreId } & Existing);
 
 export class BatchError extends Error {
@@ -64,6 +70,50 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
     expectedVersion < 1
   )
     throw new BatchError(400, "Invalid batch or version.");
+  if (kind === "correctSentMembership") {
+    if ("add" in input || !Array.isArray(input.remove) || !input.remove.length)
+      throw new BatchError(
+        400,
+        "Select at least one order that did not travel. Corrections can only remove orders.",
+      );
+    const remove = input.remove
+      .map((entry): Correction => {
+        if (!record(entry) || !record(entry.orderKey) || entry.orderKey.storeId !== origin)
+          throw new BatchError(400, "Select orders from this batch’s origin.");
+        if (typeof entry.reason !== "string" || !entry.reason.trim())
+          throw new BatchError(400, "Enter a reason for each order that did not travel.");
+        return {
+          orderKey: { storeId: origin, orderNumber: ticket(entry.orderKey.orderNumber) },
+          reason: entry.reason.trim(),
+        };
+      })
+      .sort((a, b) =>
+        a.orderKey.orderNumber < b.orderKey.orderNumber
+          ? -1
+          : a.orderKey.orderNumber > b.orderKey.orderNumber
+            ? 1
+            : 0,
+      );
+    if (new Set(remove.map((r) => r.orderKey.orderNumber)).size !== remove.length)
+      throw new BatchError(400, "Select each order once.");
+    return { operationId, change: { kind, origin, batchId, expectedVersion, remove } };
+  }
+  if (kind === "confirmContents" || (kind === "runAction" && input.action === "sendReturn")) {
+    const store = input.store;
+    if (store !== "soho" && store !== "east_village")
+      throw new BatchError(400, "Select the store holding the batch.");
+    if ("orderKeys" in input || "remove" in input || "add" in input)
+      throw new BatchError(400, "This action applies to the whole batch.");
+    return kind === "confirmContents"
+      ? { operationId, change: { kind, origin, batchId, expectedVersion, store } }
+      : { operationId, change: { kind, action: "sendReturn", origin, batchId, expectedVersion, store } };
+  }
+  if (kind === "runAction") {
+    if (input.action !== "send") throw new BatchError(400, "Unknown transfer action.");
+    if ("orderKeys" in input || "add" in input || "remove" in input)
+      throw new BatchError(400, "Send applies to the whole batch.");
+    return { operationId, change: { kind, action: input.action, origin, batchId, expectedVersion } };
+  }
   if (kind === "deleteBatch") return { operationId, change: { kind, origin, batchId, expectedVersion } };
   if (kind !== "updateBatch") throw new BatchError(400, "Unknown batch action.");
   const add = additions(input.add ?? []);

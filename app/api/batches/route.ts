@@ -16,7 +16,12 @@ export async function POST(request: NextRequest) {
     } catch {
       throw new BatchError(400, "Invalid JSON.");
     }
-    const outcome = await saveBatch(request.cookies.get(sessionCookie)?.value, input);
+    const outcome = await saveBatch(
+      request.cookies.get(sessionCookie)?.value,
+      input,
+      request.nextUrl.searchParams.get("check") === "1",
+    );
+    if (!outcome) return Response.json({ pending: true }, { status: 202, headers });
     return Response.json(outcome, { status: outcome.ok ? 200 : outcome.status, headers });
   } catch (error) {
     if (error instanceof BatchError)

@@ -2,12 +2,21 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, ne, notExists, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { eligibleAt, type StoreId } from "../db/eligible-orders";
-import { batchCounters, batches, batchOrders, centsOrders, operations } from "../db/schema";
+import { batchCounters, batches, batchOrders, centsOrders, handoffs, operations } from "../db/schema";
 import { getProfile, hasValidSessionToken } from "../staff/session";
 import { BatchError, parseBatchCommand, type BatchChange } from "./commands";
 
+import { changeContents, type Confirmation } from "./contents";
+
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
-type Result = { batchId: string; version: number; cancelled: boolean };
+type Result = {
+  batchId: string;
+  version: number;
+  cancelled: boolean;
+  sent?: true;
+  contents?: true;
+  confirmation?: Confirmation;
+};
 type Outcome = { ok: true; result: Result } | { ok: false; status: number; error: string };
 
 const retained = (batchId: string) => and(eq(batchOrders.batchId, batchId), isNull(batchOrders.removedAt));
@@ -21,6 +30,8 @@ export async function plannedBatches(origin: StoreId) {
       and(
         eq(batches.origin, origin),
         isNull(batches.cancelledAt),
+        eq(batches.contentsChanged, false),
+        isNull(batches.contentsConfirmedAt),
         notExists(
           db
             .select({ id: batchOrders.id })
@@ -128,6 +139,53 @@ async function deleteBatch(tx: Tx, batchId: string, op: string, now: Date) {
     .where(retained(batchId));
 }
 
+// The caller holds the batch lock and has checked its expected version.
+async function runAction(
+  tx: Tx,
+  change: Extract<BatchChange, { action: "send" }>,
+  operationId: string,
+  staffId: string,
+  at: Date,
+) {
+  const members = await tx
+    .select({
+      orderNumber: batchOrders.orderNumber,
+      phase: batchOrders.phase,
+      active: batchOrders.active,
+      open: sql<boolean>`cents_status_allows_transfer(${centsOrders.status})`,
+    })
+    .from(batchOrders)
+    .innerJoin(
+      centsOrders,
+      and(eq(batchOrders.storeId, centsOrders.storeId), eq(batchOrders.orderNumber, centsOrders.orderNumber)),
+    )
+    .where(retained(change.batchId))
+    .orderBy(asc(batchOrders.orderNumber))
+    .for("update");
+  if (!members.length) throw new BatchError(409, "Add an order before marking this batch sent.");
+  const invalid = members.filter((m) => !m.active || m.phase !== "planned" || !m.open);
+  if (invalid.length)
+    throw new BatchError(409, "Orders cannot be sent: " + invalid.map((m) => m.orderNumber).join(", "));
+  await tx.insert(handoffs).values(
+    members.map(({ orderNumber }) => ({
+      operationId,
+      staffId,
+      at,
+      batchId: change.batchId,
+      storeId: change.origin,
+      orderNumber,
+      action: change.action,
+      fromPhase: "planned",
+      toPhase: "sent",
+    })),
+  );
+  await tx.update(batchOrders).set({ phase: "sent" }).where(retained(change.batchId));
+}
+
+function isSend(change: BatchChange): change is Extract<BatchChange, { action: "send" }> {
+  return change.kind === "runAction" && change.action === "send";
+}
+
 async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): Promise<Result> {
   if (change.kind === "createBatch") return createBatch(tx, change, op, staffId);
   const [batch] = await tx
@@ -138,36 +196,73 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
   if (!batch) throw new BatchError(404, "Batch not found.");
   if (batch.version !== change.expectedVersion) throw new BatchError(409, "This batch changed, refresh.");
   if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
-  const travelling = await tx
-    .select({ id: batchOrders.id })
-    .from(batchOrders)
-    .where(and(retained(batch.id), ne(batchOrders.phase, "planned")))
-    .limit(1);
-  if (travelling.length) throw new BatchError(409, "Only unsent batches can be changed.");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
-  if (cancelled) await deleteBatch(tx, batch.id, op, now);
-  else await updateBatch(tx, change, op);
+  let confirmation: Confirmation | undefined;
+  const sent = isSend(change);
+  const planning = change.kind === "updateBatch" || change.kind === "deleteBatch";
+  if (sent) {
+    await runAction(tx, change, op, staffId, now);
+  } else if (planning) {
+    const travelling = await tx
+      .select({ id: batchOrders.id })
+      .from(batchOrders)
+      .where(and(retained(batch.id), ne(batchOrders.phase, "planned")))
+      .limit(1);
+    if (travelling.length || batch.contentsChanged || batch.contentsConfirmedAt)
+      throw new BatchError(409, "Only unsent batches can be changed.");
+    if (cancelled) await deleteBatch(tx, batch.id, op, now);
+    else await updateBatch(tx, change, op);
+  } else {
+    confirmation = await changeContents(tx, batch, change, op, staffId, now);
+  }
   const version = batch.version + 1;
   await tx
     .update(batches)
     .set({ version, cancelledAt: cancelled ? now : null })
     .where(eq(batches.id, batch.id));
-  return { batchId: batch.id, version, cancelled };
+  return {
+    batchId: batch.id,
+    version,
+    cancelled,
+    ...(!planning && !sent && { contents: true as const, confirmation }),
+    ...(sent && { sent: true as const }),
+  };
 }
 
-export async function saveBatch(token: string | undefined, input: unknown) {
+type Saved = Outcome & { replayed: boolean };
+
+export function saveBatch(token: string | undefined, input: unknown): Promise<Saved>;
+export function saveBatch(
+  token: string | undefined,
+  input: unknown,
+  checkOnly: boolean,
+): Promise<Saved | null>;
+export async function saveBatch(token: string | undefined, input: unknown, checkOnly = false) {
   if (!hasValidSessionToken(token)) throw new BatchError(401, "Sign in required.");
-  const { operationId, change } = parseBatchCommand(input);
-  const requestHash = createHash("sha256").update(JSON.stringify(change)).digest("hex");
   return getDb().transaction(async (tx) => {
     const actor = await getProfile(token, tx);
     if (!actor) throw new BatchError(401, "Sign in required.");
+    const { operationId, change } = parseBatchCommand(input);
+    const kind = change.kind === "runAction" ? change.action : change.kind;
+    const requestHash = createHash("sha256").update(JSON.stringify(change)).digest("hex");
+
+    const staffId = actor.staffId;
+    async function replay() {
+      const [previous] = await tx.select().from(operations).where(eq(operations.operationId, operationId));
+      if (!previous) return null;
+      if (previous.staffId !== staffId || previous.kind !== kind || previous.requestHash !== requestHash)
+        throw new BatchError(409, "This operation ID is already in use.");
+      return { ...(previous.result as Outcome), replayed: true };
+    }
+    const previous = await replay();
+    if (previous || checkOnly) return previous;
+    const allowed = actor.role === "staff" || actor.role === "admin";
     const saved = await tx
       .insert(operations)
       .values({
         operationId,
-        kind: change.kind,
+        kind,
         staffId: actor.staffId,
         requestHash,
         batchId: change.kind === "createBatch" ? null : change.batchId,
@@ -176,18 +271,12 @@ export async function saveBatch(token: string | undefined, input: unknown) {
       })
       .onConflictDoNothing()
       .returning({ id: operations.operationId });
-    if (!saved.length) {
-      const [previous] = await tx.select().from(operations).where(eq(operations.operationId, operationId));
-      if (
-        previous.staffId !== actor.staffId ||
-        previous.kind !== change.kind ||
-        previous.requestHash !== requestHash
-      )
-        throw new BatchError(409, "This operation ID is already in use.");
-      return { ...(previous.result as Outcome), replayed: true };
-    }
+    if (!saved.length) return replay();
     let outcome: Outcome;
     try {
+      if (change.kind === "correctSentMembership" && actor.role !== "admin")
+        throw new BatchError(403, "Admin access required.");
+      if (!allowed) throw new BatchError(403, "Staff access required.");
       const result = await tx.transaction((inner) => apply(inner, change, operationId, actor.staffId));
       outcome = { ok: true, result };
     } catch (error) {
