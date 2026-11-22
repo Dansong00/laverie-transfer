@@ -49,7 +49,12 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     );
     await page.getByRole("button", { name: "Create planned batch" }).click();
     await expect(page.getByText("Not confirmed yet.", { exact: false })).toBeVisible();
-    await page.reload();
+    const cookies = await context.cookies();
+    await context.clearCookies();
+    await page.getByRole("button", { name: "Check pending change" }).click();
+    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+    await context.addCookies(cookies);
+    await page.goto("/orders?store=soho");
     await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^SOHO-B/ })).toBeVisible();
     await page.getByRole("checkbox", { name: "Remove", exact: true }).check();

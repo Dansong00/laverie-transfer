@@ -48,12 +48,13 @@ export function Planner({ staffId, origin, plan, members, children }: Props) {
         });
         if (response.status >= 500) throw new Error("Unconfirmed");
         const result = await response.json();
-        localStorage.removeItem(key);
-        setUncertain(false);
         if (response.status === 401) {
+          navigating = true;
           window.location.replace("/");
           return;
         }
+        localStorage.removeItem(key);
+        setUncertain(false);
         if (!response.ok) {
           setMessage(result.error);
           return;
