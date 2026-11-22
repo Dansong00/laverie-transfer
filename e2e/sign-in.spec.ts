@@ -12,7 +12,8 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
   try {
     const signedOut = await page.request.get("/api/session?role=admin&staffId=forged");
     expect(signedOut.status()).toBe(401);
-    await page.goto("/");
+    await page.goto("/orders?store=east_village");
+    await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     await page.getByLabel("Mobile number").fill("(212) 555-0178");
     await page.getByRole("button", { name: "Send code" }).click();
     const otp = page.getByLabel("One-time code");
@@ -32,10 +33,27 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
     const response = await page.request.get("/api/session?role=admin&staffId=forged");
     expect(await response.json()).toEqual({ name: "Taylor", role: "staff", staffId: person.id });
+    await pool.query(
+      `insert into cents_orders (store_id, order_number, status, source, created_at, updated_at)
+       values ('soho','E2E-S7-SO','IN_PROGRESS','webhook',now(),now()),
+              ('east_village','E2E-S7-EV','IN_PROGRESS','webhook',now(),now())`,
+    );
+    await page.getByRole("link", { name: "Eligible orders" }).click();
+    await expect(page.getByRole("link", { name: "SoHo" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByText("#E2E-S7-SO")).toBeVisible();
+    await expect(page.getByText("#E2E-S7-EV")).toHaveCount(0);
+    await page.getByRole("link", { name: "East Village" }).click();
+    await expect(page).toHaveURL(/store=east_village$/);
+    await page.reload();
+    await expect(page.getByRole("link", { name: "East Village" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByText("#E2E-S7-EV")).toBeVisible();
+    await expect(page.getByText("#E2E-S7-SO")).toHaveCount(0);
+    await page.getByRole("link", { name: "Staff home" }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     expect((await page.request.get("/api/session")).status()).toBe(401);
   } finally {
+    await pool.query("delete from cents_orders where (store_id, order_number) in (('soho','E2E-S7-SO'), ('east_village','E2E-S7-EV'))");
     await pool.query("delete from sessions where staff_id=$1", [person.id]);
     await pool.query("delete from otp_codes where phone=$1", [phone]);
     await pool.query("delete from otp_requests where phone=$1", [phone]);

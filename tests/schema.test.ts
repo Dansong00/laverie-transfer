@@ -1,3 +1,4 @@
+import { listEligibleOrders } from "../db/eligible-orders";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
@@ -377,4 +378,33 @@ test.each(["COMPLETED", "CANCELLED"])("a %s order cannot be added to a planned b
   await expect(insertMembership({
     batchId: "SOHO-B001", originStoreId: "soho", storeId: "soho", orderNumber: "100", active: true, removedAt: null,
   })).rejects.toMatchObject({ code: "23514", constraint: "batch_orders_nonterminal_order" });
+});
+
+test("eligibility is scoped to the selected store and excludes claimed, terminal and returned orders", async () => {
+  await seedOrdersAndBatches();
+  const membership = { batchId: "SOHO-B001", originStoreId: "soho", storeId: "soho" };
+  await insertMembership({ ...membership, orderNumber: "100", active: true, removedAt: null });
+  const due = new Date("2026-10-08T17:00:00Z");
+  await pool.query(
+    `insert into cents_orders (store_id, order_number, status, due_at, source, created_at, updated_at)
+     values ('soho','101','COMPLETED',null,'webhook',now(),now()),
+            ('soho','102','CANCELLED',null,'webhook',now(),now()),
+            ('soho','103','IN_PROGRESS',null,'webhook',now(),now()),
+            ('soho','104','IN_PROGRESS',$1,'webhook',now(),now()),
+            ('soho','105','IN_PROGRESS',$1,'webhook',now(),now()),
+            ('soho','106','IN_PROGRESS',$1::timestamptz - interval '1 day','webhook',now(),now()),
+            ('soho','107','IN_PROGRESS',null,'webhook',now(),now())`, [due],
+  );
+  await insertMembership({ ...membership, orderNumber: "104", active: false, removedAt: new Date() });
+  await pool.query("update cents_orders set is_personal_detergent=true where order_number='104'");
+  await pool.query(
+    `insert into handoffs (operation_id, batch_id, store_id, order_number, action, from_phase, to_phase, staff_id, at)
+     values ($1,'SOHO-B001','soho','107','acknowledgeReturn','return_sent','returned',$2,now())`,
+    [operationId, staffId],
+  );
+
+  const eligible = await listEligibleOrders("soho");
+  expect(eligible.map(row => row.orderNumber)).toEqual(["106", "104", "105", "103"]);
+  expect(eligible[1]).toMatchObject({ dueAt: due, isPersonalDetergent: true });
+  expect((await listEligibleOrders("east_village")).map(row => row.orderNumber)).toEqual(["100"]);
 });
