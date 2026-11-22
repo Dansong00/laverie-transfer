@@ -6,6 +6,8 @@ export type OrderKey = { storeId: StoreId; orderNumber: string };
 type Correction = { orderKey: OrderKey; reason: string };
 export type StoreAction = Existing & { kind: "runAction"; origin: StoreId; store: StoreId } & (
     | { action: "receive" }
+    | { action: "sendReturn" }
+    | { action: "acknowledgeReturn" }
     | { action: "startProcessing" | "markReady"; orderKeys: OrderKey[] }
   );
 export const correctionReasonLimit = 1000;
@@ -19,7 +21,6 @@ export type BatchChange =
   | { kind: "createBatch"; origin: StoreId; add: string[] }
   | ({ kind: "updateBatch"; origin: StoreId; add: string[]; remove: Removal[] } & Existing)
   | ({ kind: "runAction"; action: "send"; origin: StoreId } & Existing)
-  | ({ kind: "runAction"; action: "sendReturn"; origin: StoreId; store: StoreId } & Existing)
   | ({ kind: "confirmContents"; origin: StoreId; store: StoreId } & Existing)
   | ({ kind: "correctSentMembership"; origin: StoreId; remove: Correction[] } & Existing)
   | ({ kind: "deleteBatch"; origin: StoreId } & Existing);
@@ -161,7 +162,10 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
       },
     };
   }
-  if (kind === "confirmContents" || (kind === "runAction" && input.action === "sendReturn")) {
+  if (
+    kind === "confirmContents" ||
+    (kind === "runAction" && (input.action === "sendReturn" || input.action === "acknowledgeReturn"))
+  ) {
     const store = input.store;
     if (store !== "soho" && store !== "east_village")
       throw new BatchError(400, "Select the store holding the batch.");
@@ -169,7 +173,17 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
       throw new BatchError(400, "This action applies to the whole batch.");
     return kind === "confirmContents"
       ? { operationId, change: { kind, origin, batchId, expectedVersion, store } }
-      : { operationId, change: { kind, action: "sendReturn", origin, batchId, expectedVersion, store } };
+      : {
+          operationId,
+          change: {
+            kind,
+            action: input.action === "sendReturn" ? "sendReturn" : "acknowledgeReturn",
+            origin,
+            batchId,
+            expectedVersion,
+            store,
+          },
+        };
   }
   if (kind === "runAction") {
     if (input.action !== "send") throw new BatchError(400, "Unknown transfer action.");

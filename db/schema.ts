@@ -152,8 +152,12 @@ export const batches = pgTable(
     contentsConfirmedAt: timestamp("contents_confirmed_at", tz),
     contentsConfirmedBy: uuid("contents_confirmed_by").references(() => staff.id),
     contentsConfirmedOrderKeys: jsonb("contents_confirmed_order_keys"),
+    returnAcknowledgedAt: timestamp("return_acknowledged_at", tz),
   },
-  (table) => [unique("batches_id_origin").on(table.id, table.origin)],
+  (table) => [
+    unique("batches_id_origin").on(table.id, table.origin),
+    index("batches_return_acknowledged_at_idx").on(table.returnAcknowledgedAt),
+  ],
 );
 
 export const batchCounters = pgTable("batch_counters", {

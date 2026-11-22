@@ -474,16 +474,47 @@ test("the two stores see the right sections, including retained orders after ass
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "ready_for_return", ready: 2 },
   ]);
+  const acknowledge = (version: number) => ({
+    ...trip(version),
+    kind: "runAction",
+    action: "acknowledgeReturn",
+    store: "soho",
+  });
+  expect(await saveBatch(token, acknowledge(7))).toMatchObject({ ok: false, status: 409 });
+  expect(await sentBatchesAt("east_village")).toMatchObject([{ id }]);
   await saveBatch(token, sendReturn(7));
-  for (const store of ["soho", "east_village"] as const)
-    expect(await listBatchesForStore(store)).toMatchObject([{ section: "returning", total: 2 }]);
-  // S14 supplies acknowledgment; simulate its released assignments without removing their memberships.
-  await pool.query("update batch_orders set phase='returned',active=false where removed_at is null");
+  expect(await sentBatchesAt("east_village")).toEqual([]);
   await pool.query("update cents_orders set status='COMPLETED' where order_number='2'");
+  for (const store of ["soho", "east_village"] as const)
+    expect(await listBatchesForStore(store)).toMatchObject([
+      { section: "returning", total: 2, contentsChanged: false },
+    ]);
+  expect(await saveBatch(token, { ...acknowledge(8), store: "east_village" })).toMatchObject({
+    ok: false,
+    status: 403,
+  });
+  await expect(saveBatch(token, { ...acknowledge(8), orderKeys: [] })).rejects.toMatchObject({ status: 400 });
+  expect(await saveBatch(token, acknowledge(7))).toMatchObject({ ok: false, status: 409 });
+  expect(await getBatch(id)).toMatchObject({ version: 8 });
+  const cmd = acknowledge(8);
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, result: { version: 9 } });
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, replayed: true });
+  expect(await saveBatch(token, acknowledge(9))).toMatchObject({ ok: false, status: 409 });
   for (const store of ["soho", "east_village"] as const)
     expect(await listBatchesForStore(store)).toMatchObject([{ section: "recently_returned", total: 2 }]);
   const detail = await getBatch(id);
-  expect(detail).toMatchObject({ derivedPhase: "returned", phaseCounts: { returned: 2 }, version: 8 });
+  expect(detail).toMatchObject({ derivedPhase: "returned", phaseCounts: { returned: 2 }, version: 9 });
+  expect(detail?.orders.every(({ membership }) => !membership.active && !membership.removedAt)).toBe(true);
+  expect(detail?.history.filter(({ handoff }) => handoff.operationId === cmd.operationId)).toHaveLength(2);
+  expect(await eligible()).toEqual(["3", "4", "5"]);
+  expect(await saveBatch(token, create(["1"]))).toMatchObject({ ok: false, status: 409 });
+  await pool.query(
+    "update batches set created_at=now()-interval '1 year', return_acknowledged_at=now()-interval '6 days'",
+  );
+  expect(await listBatchesForStore("soho")).toMatchObject([{ id }]);
+  await pool.query("update batches set return_acknowledged_at=now()-interval '7 days 1 second'");
+  for (const store of ["soho", "east_village"] as const) expect(await listBatchesForStore(store)).toEqual([]);
+  expect(await getBatch(id)).toMatchObject({ version: 9, total: 2, section: "recently_returned" });
   expect(detail?.orders.map((row) => row.order.orderNumber)).toEqual(["1", "2"]);
   expect(detail?.history[0]).toMatchObject({
     staffName: "Taylor",
