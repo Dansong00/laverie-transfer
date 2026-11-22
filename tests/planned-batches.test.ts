@@ -325,6 +325,13 @@ const correction = (version: number, ...numbers: string[]) => ({
     reason: "Stayed at SoHo",
   })),
 });
+const receive = (version: number) => ({ ...trip(version), kind: "runAction", action: "receive" });
+const storeOrders = (version: number, action: "startProcessing" | "markReady", ...numbers: string[]) => ({
+  ...trip(version),
+  kind: "runAction",
+  action,
+  orderKeys: numbers.map((orderNumber) => ({ storeId: "soho", orderNumber })),
+});
 const confirm = (version: number) => ({ ...trip(version), kind: "confirmContents" });
 const sendReturn = (version: number) => ({ ...trip(version), kind: "runAction", action: "sendReturn" });
 
@@ -333,17 +340,16 @@ test("a corrected batch needs a versioned contents confirmation before return, i
   await pool.query("update staff set role='admin' where id=$1", [admin.id]);
   await saveBatch(token, create(["1", "2", "3"]));
   await saveBatch(token, send());
-  // S12 supplies these phases through staff actions; use its mixed-phase starting state here.
-  await pool.query(
-    "update batch_orders set phase=case when order_number='1' then 'processing' else 'ready_for_return' end",
-  );
-  const remove = correction(2, "1");
+  await saveBatch(token, receive(2));
+  await saveBatch(token, storeOrders(3, "startProcessing", "1", "2", "3"));
+  await saveBatch(token, storeOrders(4, "markReady", "2", "3"));
+  const remove = correction(5, "1");
   expect(await saveBatch(token, { ...remove, role: "admin", staffId: admin.id })).toMatchObject({
     ok: false,
     status: 403,
   });
   const fix = { ...remove, operationId: randomUUID() };
-  expect(await saveBatch(admin.token, fix)).toMatchObject({ ok: true, result: { version: 3 } });
+  expect(await saveBatch(admin.token, fix)).toMatchObject({ ok: true, result: { version: 6 } });
   const rows = await pool.query(
     "select c.corrects=s.id linked,c.staff_id,c.operation_id,bo.removal_note,bo.active from handoffs c join handoffs s on s.action='send' and s.order_number=c.order_number join batch_orders bo on bo.removed_by_op=c.operation_id where c.action='correctSentMembership'",
   );
@@ -356,18 +362,18 @@ test("a corrected batch needs a versioned contents confirmation before return, i
       active: false,
     },
   ]);
-  const blocked = sendReturn(3);
+  const blocked = sendReturn(6);
   expect(await saveBatch(token, blocked)).toMatchObject({
     ok: false,
     status: 409,
     error: "Contents changed, confirm before return.",
   });
-  expect(await saveBatch(token, { ...confirm(3), store: "soho" })).toMatchObject({ ok: false, status: 403 });
-  const cmd = confirm(3);
+  expect(await saveBatch(token, { ...confirm(6), store: "soho" })).toMatchObject({ ok: false, status: 403 });
+  const cmd = confirm(6);
   const orderKeys = ["2", "3"].map((orderNumber) => ({ storeId: "soho", orderNumber }));
   expect(await saveBatch(token, cmd)).toMatchObject({
     ok: true,
-    result: { version: 4, confirmation: { staffId, at: expect.any(String), orderKeys } },
+    result: { version: 7, confirmation: { staffId, at: expect.any(String), orderKeys } },
   });
   expect(
     (
@@ -381,25 +387,25 @@ test("a corrected batch needs a versioned contents confirmation before return, i
     contents_confirmed_at: expect.any(Date),
     contents_confirmed_order_keys: orderKeys,
   });
-  expect(await saveBatch(admin.token, correction(4, "2"))).toMatchObject({
+  expect(await saveBatch(admin.token, correction(7, "2"))).toMatchObject({
     ok: true,
-    result: { version: 5 },
+    result: { version: 8 },
   });
   expect(await saveBatch(token, cmd)).toMatchObject({
     ok: true,
     replayed: true,
-    result: { version: 4, confirmation: { orderKeys } },
+    result: { version: 7, confirmation: { orderKeys } },
   });
-  expect(await saveBatch(token, sendReturn(5))).toMatchObject({ ok: false, status: 409 });
-  expect(await saveBatch(token, confirm(5))).toMatchObject({
+  expect(await saveBatch(token, sendReturn(8))).toMatchObject({ ok: false, status: 409 });
+  expect(await saveBatch(token, confirm(8))).toMatchObject({
     ok: true,
-    result: { version: 6, confirmation: { orderKeys: [orderKeys[1]] } },
+    result: { version: 9, confirmation: { orderKeys: [orderKeys[1]] } },
   });
-  expect(await saveBatch(token, sendReturn(6))).toMatchObject({ ok: true, result: { version: 7 } });
+  expect(await saveBatch(token, sendReturn(9))).toMatchObject({ ok: true, result: { version: 10 } });
   expect((await pool.query("select order_number from handoffs where action='sendReturn'")).rows).toEqual([
     { order_number: "3" },
   ]);
-  expect(await saveBatch(admin.token, correction(7, "3"))).toMatchObject({ ok: false, status: 409 });
+  expect(await saveBatch(admin.token, correction(10, "3"))).toMatchObject({ ok: false, status: 409 });
 });
 
 test("sent corrections are remove-only, validate every member and never reopen a fully corrected batch", async () => {
@@ -421,11 +427,17 @@ test("sent corrections are remove-only, validate every member and never reopen a
   expect(await plannedBatches("soho")).toEqual([]);
   expect(await saveBatch(token, { ...edit("SOHO-B001", 3), add: ["3"] })).toMatchObject({ ok: false });
   expect(await saveBatch(token, confirm(3))).toMatchObject({
+    ok: false,
+    error: "Receive the batch before confirming its contents.",
+  });
+  expect(await saveBatch(token, receive(3))).toMatchObject({ ok: true });
+  expect(await saveBatch(token, receive(4))).toMatchObject({ ok: false });
+  expect(await saveBatch(token, confirm(4))).toMatchObject({
     ok: true,
     result: { confirmation: { orderKeys: [] } },
   });
   expect(await plannedBatches("soho")).toEqual([]);
-  expect(await saveBatch(token, sendReturn(4))).toMatchObject({ ok: false });
+  expect(await saveBatch(token, sendReturn(5))).toMatchObject({ ok: false });
 });
 
 test("a session with an unsupported role cannot send and its rejection is replayed after a role change", async () => {
@@ -450,19 +462,18 @@ test("the two stores see the right sections, including retained orders after ass
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "arriving", version: 3, total: 2 },
   ]);
-  await pool.query("update batch_orders set phase='received' where removed_at is null");
+  await saveBatch(token, receive(3));
   expect(await listBatchesForStore("east_village")).toMatchObject([{ section: "received" }]);
-  await pool.query(
-    "update batch_orders set phase=case when order_number='1' then 'processing' else 'ready_for_return' end where removed_at is null",
-  );
+  await saveBatch(token, storeOrders(4, "startProcessing", "1", "2"));
+  await saveBatch(token, storeOrders(5, "markReady", "2"));
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "processing", ready: 1, total: 2 },
   ]);
-  await pool.query("update batch_orders set phase='ready_for_return' where removed_at is null");
+  await saveBatch(token, storeOrders(6, "markReady", "1"));
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "ready_for_return", ready: 2 },
   ]);
-  await saveBatch(token, sendReturn(3));
+  await saveBatch(token, sendReturn(7));
   for (const store of ["soho", "east_village"] as const)
     expect(await listBatchesForStore(store)).toMatchObject([{ section: "returning", total: 2 }]);
   // S14 supplies acknowledgment; simulate its released assignments without removing their memberships.
@@ -471,7 +482,7 @@ test("the two stores see the right sections, including retained orders after ass
   for (const store of ["soho", "east_village"] as const)
     expect(await listBatchesForStore(store)).toMatchObject([{ section: "recently_returned", total: 2 }]);
   const detail = await getBatch(id);
-  expect(detail).toMatchObject({ derivedPhase: "returned", phaseCounts: { returned: 2 }, version: 4 });
+  expect(detail).toMatchObject({ derivedPhase: "returned", phaseCounts: { returned: 2 }, version: 8 });
   expect(detail?.orders.map((row) => row.order.orderNumber)).toEqual(["1", "2"]);
   expect(detail?.history[0]).toMatchObject({
     staffName: "Taylor",
@@ -491,7 +502,9 @@ test("empty plans stay at the origin, and a confirmed empty departure leaves the
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "arriving", contentsChanged: true, total: 0 },
   ]);
-  await saveBatch(token, { ...confirm(3), batchId: id });
+  await saveBatch(token, { ...receive(3), batchId: id });
+  expect(await listBatchesForStore("east_village")).toMatchObject([{ section: "received", total: 0 }]);
+  await saveBatch(token, { ...confirm(4), batchId: id });
   expect(await listBatchesForStore("east_village")).toEqual([]);
   expect(await listBatchesForStore("soho")).toEqual([]);
   expect(await getBatch(id)).toMatchObject({
@@ -515,4 +528,70 @@ test("board preferences default to all, accept none and only write for the authe
   expect(
     (await pool.query("select staff_id from operations where kind='updateStaffPreferences'")).rows,
   ).toEqual([{ staff_id: staffId }, { staff_id: staffId }]);
+});
+
+test("store actions use one version and one operation for the selected orders, including retries", async () => {
+  await saveBatch(token, create(["1", "2", "3", "4"]));
+  await saveBatch(token, send());
+  expect(await saveBatch(token, { ...receive(2), store: "soho" })).toMatchObject({ ok: false, status: 403 });
+  expect(await saveBatch(token, storeOrders(2, "startProcessing", "1"))).toMatchObject({ ok: false });
+  const receipt = receive(2);
+  expect(await saveBatch(token, receipt)).toMatchObject({ ok: true, result: { version: 3 } });
+  const skip = storeOrders(3, "markReady", "1");
+  expect(await saveBatch(token, skip)).toMatchObject({ ok: false, status: 409 });
+  const one = storeOrders(3, "startProcessing", "1");
+  await saveBatch(token, one);
+  await saveBatch(token, storeOrders(4, "markReady", "1"));
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "received", ready: 1, total: 4 },
+  ]);
+  const start = storeOrders(5, "startProcessing", "4", "3", "2");
+  expect(await saveBatch(token, start)).toMatchObject({ ok: true, result: { version: 6 } });
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "processing", ready: 1, total: 4 },
+  ]);
+  for (const cmd of [
+    storeOrders(6, "markReady", "1", "2"),
+    storeOrders(6, "markReady", "2", "5"),
+    storeOrders(5, "markReady", "2", "3"),
+  ]) {
+    expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 409 });
+    expect((await pool.query("select from handoffs where operation_id=$1", [cmd.operationId])).rowCount).toBe(
+      0,
+    );
+  }
+  expect(await getBatch("SOHO-B001")).toMatchObject({
+    version: 6,
+    phaseCounts: { processing: 3, ready_for_return: 1 },
+  });
+  const bulk = storeOrders(6, "markReady", "4", "2", "3");
+  expect(await saveBatch(token, bulk)).toMatchObject({ ok: true, result: { version: 7 } });
+  expect(await saveBatch(token, { ...bulk, orderKeys: [...bulk.orderKeys].reverse() })).toMatchObject({
+    replayed: true,
+    result: { version: 7 },
+  });
+  await expect(saveBatch(token, { ...bulk, orderKeys: [bulk.orderKeys[0]] })).rejects.toMatchObject({
+    status: 409,
+  });
+  await expect(
+    saveBatch(token, { ...bulk, orderKeys: [bulk.orderKeys[0], bulk.orderKeys[0]] }),
+  ).rejects.toMatchObject({ status: 400 });
+  await expect(
+    saveBatch(token, { ...bulk, orderKeys: [{ storeId: "east_village", orderNumber: "2" }] }),
+  ).rejects.toMatchObject({ status: 400 });
+  for (const [cmd, count] of [
+    [receipt, 4],
+    [one, 1],
+    [start, 3],
+    [bulk, 3],
+  ] as const) {
+    const rows = await pool.query(
+      "select count(*)::int as n,count(distinct at)::int as times from handoffs where operation_id=$1 and staff_id=$2",
+      [cmd.operationId, staffId],
+    );
+    expect(rows.rows).toEqual([{ n: count, times: 1 }]);
+  }
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "ready_for_return", ready: 4, total: 4, version: 7 },
+  ]);
 });

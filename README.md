@@ -1,6 +1,6 @@
 # Laverie Transfer
 
-Transfer board for SoHo and East Village staff. The app shell, database migrations, a health check, and CI are in place. Domain tables for Cents orders, batches, handoffs, and staff are migrated. Staff can sign in by text. The transfer board comes in a later slice.
+Transfer board for SoHo and East Village staff. The app shell, database migrations, a health check, and CI are in place. Domain tables for Cents orders, batches, handoffs, and staff are migrated. Staff can sign in by text. The shared board tracks batches through receipt, processing and readiness for return.
 
 Next.js (App Router) and TypeScript serve the UI and API. Postgres is the database, via Drizzle and plain SQL migrations. Hosted databases are Neon. Vitest covers unit and database tests. Playwright covers the smoke path. GitHub Actions runs on every pull request.
 
@@ -71,6 +71,8 @@ Directory changes and their audit records commit together. The server rejects a 
 Open **Transfer board** from the staff profile. Planned batches appear at their origin. Arriving, Received, Processing, and Ready for return appear at the destination. Both stores see Returning and Recently returned. Open a batch to see its retained orders and handoff history. The board refreshes every 45 seconds while visible and when reopened or focused.
 
 **Board sections** saves the selected sections for the signed-in staff member across stores and devices. All seven sections start visible.
+
+At the destination, use **Mark received** on an arriving batch. Open the batch to start processing received orders and mark processing orders ready, individually or together. A bulk change advances the batch version once and records one handoff per selected order. The destination must record receipt before confirming corrected contents, even when no orders remain.
 
 ## Planned batches
 

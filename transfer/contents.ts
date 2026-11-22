@@ -4,6 +4,8 @@ import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, handoffs, operations, staff } from "../db/schema";
 import { BatchError, type BatchChange, type OrderKey } from "./commands";
 
+import { receiptRecorded } from "./processing";
+
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 type Batch = typeof batches.$inferSelect;
 type ContentsChange = Extract<
@@ -20,6 +22,7 @@ export async function sentBatchesAt(store: StoreId) {
       origin: batches.origin,
       version: batches.version,
       changed: batches.contentsChanged,
+      received: receiptRecorded(batches.id),
       confirmedEmpty: sql<boolean>`${batches.contentsConfirmedAt} is not null and ${batches.contentsConfirmedOrderKeys} = '[]'::jsonb`,
     })
     .from(batches)
@@ -157,6 +160,12 @@ export async function changeContents(
   if (change.store !== batch.destination) throw new BatchError(403, "Select the store holding this batch.");
   const orderKeys = members.map((m) => ({ storeId: change.origin, orderNumber: m.orderNumber }));
   if (change.kind === "confirmContents") {
+    const [receipt] = await tx
+      .select({ received: receiptRecorded(batch.id) })
+      .from(batches)
+      .where(eq(batches.id, batch.id));
+    if (!receipt.received || members.some((m) => m.phase === "sent"))
+      throw new BatchError(409, "Receive the batch before confirming its contents.");
     if (!batch.contentsChanged) throw new BatchError(409, "There are no changed contents to confirm.");
     await tx
       .update(batches)

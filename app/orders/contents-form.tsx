@@ -10,6 +10,7 @@ export type SentTrip = Awaited<ReturnType<typeof contentsHistory>> & {
   origin: StoreId;
   version: number;
   changed: boolean;
+  received: boolean;
 };
 
 export function ContentsForm({
@@ -84,7 +85,10 @@ export function ContentsForm({
           {admin && canCorrect && <button disabled={!selected.length}>Record correction</button>}
         </fieldset>
       </form>
-      {trip.changed && (
+      {trip.changed && !trip.received && (
+        <p>Receive the batch on the transfer board before confirming contents.</p>
+      )}
+      {trip.changed && trip.received && !remaining.some((m) => m.phase === "sent") && (
         <button
           disabled={disabled || selected.length > 0}
           onClick={() => {

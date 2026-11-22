@@ -6,6 +6,7 @@ import { batchCounters, batches, batchOrders, centsOrders, handoffs, operations 
 import { getProfile, hasValidSessionToken } from "../staff/session";
 import { BatchError, parseBatchCommand, type BatchChange } from "./commands";
 
+import { advanceAtStore, isStoreAction } from "./processing";
 import { changeContents, type Confirmation } from "./contents";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -14,6 +15,7 @@ type Result = {
   version: number;
   cancelled: boolean;
   sent?: true;
+  board?: true;
   contents?: true;
   confirmation?: Confirmation;
 };
@@ -194,14 +196,23 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     .where(and(eq(batches.id, change.batchId), eq(batches.origin, change.origin)))
     .for("update");
   if (!batch) throw new BatchError(404, "Batch not found.");
-  if (batch.version !== change.expectedVersion) throw new BatchError(409, "This batch changed, refresh.");
+  if (batch.version !== change.expectedVersion) {
+    const affected =
+      isStoreAction(change) && change.action !== "receive"
+        ? " Orders: " + change.orderKeys.map((k) => k.orderNumber).join(", ")
+        : "";
+    throw new BatchError(409, "This batch changed, refresh." + affected);
+  }
   if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
   let confirmation: Confirmation | undefined;
   const sent = isSend(change);
   const planning = change.kind === "updateBatch" || change.kind === "deleteBatch";
-  if (sent) {
+  const board = isStoreAction(change);
+  if (board) {
+    await advanceAtStore(tx, batch, change, op, staffId, now);
+  } else if (sent) {
     await runAction(tx, change, op, staffId, now);
   } else if (planning) {
     const travelling = await tx
@@ -225,7 +236,8 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     batchId: batch.id,
     version,
     cancelled,
-    ...(!planning && !sent && { contents: true as const, confirmation }),
+    ...(board && { board: true as const }),
+    ...(!board && !planning && !sent && { contents: true as const, confirmation }),
     ...(sent && { sent: true as const }),
   };
 }

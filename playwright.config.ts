@@ -20,7 +20,8 @@ process.env.LAVERIE_TEST_INBOX ??= join(tmpdir(), `laverie-sms-${randomUUID()}`)
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: false,
+  // The browser fixtures share one database, including the count of active admins.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   use: {
