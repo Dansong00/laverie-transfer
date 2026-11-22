@@ -35,6 +35,7 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
     plannedBatches(store),
     sentBatchesAt(store),
   ]);
+  const listedTrips = trips.filter((t) => !t.confirmedEmpty);
   const trip = trips.find((t) => t.id === query.contents);
   if (query.contents && !trip) notFound();
   const history = trip ? await contentsHistory(trip.id) : undefined;
@@ -45,6 +46,8 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
   return (
     <main className="eligible-orders">
       <Link href="/">Staff home</Link>
+      {" · "}
+      <Link href={"/board?store=" + store}>Transfer board</Link>
       <h1>Eligible orders</h1>
       <nav aria-label="Store">
         {Object.entries(stores).map(([id, name]) => (
@@ -97,11 +100,11 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
           </ul>
         )}
       </Planner>
-      {trips.length > 0 && (
+      {listedTrips.length > 0 && (
         <section>
           <h2>Sent to {stores[store]}</h2>
           <ul>
-            {trips.map((t) => (
+            {listedTrips.map((t) => (
               <li key={t.id}>
                 <Link href={`/orders?store=${store}&contents=${t.id}`}>{t.id}</Link>
                 {t.changed && " · Contents changed, confirm before return"}

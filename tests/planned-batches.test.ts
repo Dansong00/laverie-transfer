@@ -4,6 +4,9 @@ import { POST as receiveCentsWebhook } from "../app/api/cents/webhook/route";
 import { listEligibleOrders } from "../db/eligible-orders";
 import { sessionToken } from "../staff/session";
 import { saveBatch, plannedBatches, plannedMembers } from "../transfer/planned";
+import { getBatch, listBatchesForStore } from "../transfer/board";
+import { boardSections } from "../db/schema";
+import { getStaffPreferences, updateStaffPreferences } from "../staff/preferences";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
 
 const pool = setupStaffTestDatabase();
@@ -433,4 +436,83 @@ test("a session with an unsupported role cannot send and its rejection is replay
   await pool.query("update staff set role='staff' where id=$1", [staffId]);
   expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 403, replayed: true });
   expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+});
+
+test("the two stores see the right sections, including retained orders after assignments end", async () => {
+  const id = "SOHO-B001";
+  await saveBatch(token, create(["1", "2", "3"]));
+  await saveBatch(token, { ...edit(id, 1), remove: [{ orderNumber: "3", note: "Staying here" }] });
+  expect(await listBatchesForStore("soho")).toMatchObject([{ id, section: "planned", total: 2 }]);
+  expect(await listBatchesForStore("east_village")).toEqual([]);
+  const departure = send(2);
+  await saveBatch(token, departure);
+  expect(await listBatchesForStore("soho")).toEqual([]);
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "arriving", version: 3, total: 2 },
+  ]);
+  await pool.query("update batch_orders set phase='received' where removed_at is null");
+  expect(await listBatchesForStore("east_village")).toMatchObject([{ section: "received" }]);
+  await pool.query(
+    "update batch_orders set phase=case when order_number='1' then 'processing' else 'ready_for_return' end where removed_at is null",
+  );
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "processing", ready: 1, total: 2 },
+  ]);
+  await pool.query("update batch_orders set phase='ready_for_return' where removed_at is null");
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "ready_for_return", ready: 2 },
+  ]);
+  await saveBatch(token, sendReturn(3));
+  for (const store of ["soho", "east_village"] as const)
+    expect(await listBatchesForStore(store)).toMatchObject([{ section: "returning", total: 2 }]);
+  // S14 supplies acknowledgment; simulate its released assignments without removing their memberships.
+  await pool.query("update batch_orders set phase='returned',active=false where removed_at is null");
+  await pool.query("update cents_orders set status='COMPLETED' where order_number='2'");
+  for (const store of ["soho", "east_village"] as const)
+    expect(await listBatchesForStore(store)).toMatchObject([{ section: "recently_returned", total: 2 }]);
+  const detail = await getBatch(id);
+  expect(detail).toMatchObject({ derivedPhase: "returned", phaseCounts: { returned: 2 }, version: 4 });
+  expect(detail?.orders.map((row) => row.order.orderNumber)).toEqual(["1", "2"]);
+  expect(detail?.history[0]).toMatchObject({
+    staffName: "Taylor",
+    handoff: { action: "send", operationId: departure.operationId },
+  });
+});
+
+test("empty plans stay at the origin, and a confirmed empty departure leaves the live board", async () => {
+  await saveBatch(token, create([]));
+  expect(await listBatchesForStore("soho")).toMatchObject([{ section: "planned", total: 0 }]);
+  await saveBatch(token, { ...edit("SOHO-B001", 1), kind: "deleteBatch" });
+  await saveBatch(token, create(["1"]));
+  const id = "SOHO-B002";
+  await saveBatch(token, { ...send(), batchId: id });
+  await pool.query("update staff set role='admin' where id=$1", [staffId]);
+  await saveBatch(token, { ...correction(2, "1"), batchId: id });
+  expect(await listBatchesForStore("east_village")).toMatchObject([
+    { section: "arriving", contentsChanged: true, total: 0 },
+  ]);
+  await saveBatch(token, { ...confirm(3), batchId: id });
+  expect(await listBatchesForStore("east_village")).toEqual([]);
+  expect(await listBatchesForStore("soho")).toEqual([]);
+  expect(await getBatch(id)).toMatchObject({
+    id,
+    section: null,
+    history: [{ handoff: { action: "send" } }, { handoff: { action: "correctSentMembership" } }],
+  });
+});
+
+test("board preferences default to all, accept none and only write for the authenticated staff member", async () => {
+  const other = await account("+12125550124");
+  expect(await getStaffPreferences(staffId)).toEqual(boardSections);
+  expect(await updateStaffPreferences(token, ["processing", "planned"])).toEqual(["planned", "processing"]);
+  expect(await getStaffPreferences(staffId)).toEqual(["planned", "processing"]);
+  expect(await updateStaffPreferences(token, [])).toEqual([]);
+  await updateStaffPreferences(token, []);
+  await expect(updateStaffPreferences(token, ["invalid"])).rejects.toMatchObject({ status: 400 });
+  await expect(updateStaffPreferences(undefined, ["planned"])).rejects.toMatchObject({ status: 401 });
+  expect(await getStaffPreferences(staffId)).toEqual([]);
+  expect(await getStaffPreferences(other.id)).toEqual(boardSections);
+  expect(
+    (await pool.query("select staff_id from operations where kind='updateStaffPreferences'")).rows,
+  ).toEqual([{ staff_id: staffId }, { staff_id: staffId }]);
 });

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, exists, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, exists, isNull, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, handoffs, operations, staff } from "../db/schema";
@@ -20,6 +20,7 @@ export async function sentBatchesAt(store: StoreId) {
       origin: batches.origin,
       version: batches.version,
       changed: batches.contentsChanged,
+      confirmedEmpty: sql<boolean>`${batches.contentsConfirmedAt} is not null and ${batches.contentsConfirmedOrderKeys} = '[]'::jsonb`,
     })
     .from(batches)
     .where(
