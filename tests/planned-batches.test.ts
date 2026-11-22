@@ -517,6 +517,8 @@ test("the two stores see the right sections, including retained orders after ass
   await pool.query("update batches set return_acknowledged_at=now()-interval '7 days 1 second'");
   for (const store of ["soho", "east_village"] as const) expect(await listBatchesForStore(store)).toEqual([]);
   expect(await getBatch(id)).toMatchObject({ version: 9, total: 2, section: "recently_returned" });
+  const history = await contentsHistory(id);
+  expect(history.custody.filter(h => h.action === "acknowledgeReturn").map(h => h.number)).toEqual(["1", "2"]);
   expect(detail?.orders.map((row) => row.order.orderNumber)).toEqual(["1", "2"]);
   expect(detail?.history[0]).toMatchObject({
     staffName: "Taylor",
