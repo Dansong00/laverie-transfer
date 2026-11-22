@@ -5,6 +5,7 @@ type Removal = { orderNumber: string; note: string };
 export type BatchChange =
   | { kind: "createBatch"; origin: StoreId; add: string[] }
   | ({ kind: "updateBatch"; origin: StoreId; add: string[]; remove: Removal[] } & Existing)
+  | ({ kind: "runAction"; action: "send"; origin: StoreId } & Existing)
   | ({ kind: "deleteBatch"; origin: StoreId } & Existing);
 
 export class BatchError extends Error {
@@ -64,6 +65,12 @@ export function parseBatchCommand(input: unknown): { operationId: string; change
     expectedVersion < 1
   )
     throw new BatchError(400, "Invalid batch or version.");
+  if (kind === "runAction") {
+    if (input.action !== "send") throw new BatchError(400, "Unknown transfer action.");
+    if ("orderKeys" in input || "add" in input || "remove" in input)
+      throw new BatchError(400, "Send applies to the whole batch.");
+    return { operationId, change: { kind, action: input.action, origin, batchId, expectedVersion } };
+  }
   if (kind === "deleteBatch") return { operationId, change: { kind, origin, batchId, expectedVersion } };
   if (kind !== "updateBatch") throw new BatchError(400, "Unknown batch action.");
   const add = additions(input.add ?? []);

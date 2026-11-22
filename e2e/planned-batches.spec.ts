@@ -82,7 +82,45 @@ test("staff can recover a saved plan after a lost response, edit it and release 
         await pool.query("select kind from operations where staff_id=$1 order by created_at", [staff])
       ).rows.map((r) => r.kind),
     ).toEqual(["createBatch", "updateBatch", "deleteBatch"]);
+    await page.getByRole("checkbox", { name: "#" + numbers[1] }).check();
+    await page.getByRole("button", { name: "Create planned batch" }).click();
+    await expect(page.getByRole("heading", { name: /^SOHO-B/ })).toBeVisible();
+    const requests: string[] = [];
+    await page.route(
+      "**/api/batches",
+      async (route) => {
+        requests.push(route.request().postDataJSON().operationId);
+        const result = await route.fetch();
+        expect(result.status()).toBe(200);
+        await route.abort();
+      },
+      { times: 1 },
+    );
+    await page.route(
+      "**/api/batches?check=1",
+      async (route) => {
+        requests.push(route.request().postDataJSON().operationId);
+        await route.abort();
+      },
+      { times: 1 },
+    );
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Mark sent" }).click();
+    await expect(page.getByText("Not confirmed yet. Retry to check this change.")).toBeVisible();
+    expect(await pendingKeys()).toHaveLength(1);
+    const statusCheck = page.waitForRequest((req) => req.url().endsWith("/api/batches?check=1"));
+    await page.reload();
+    requests.push((await statusCheck).postDataJSON().operationId);
+    await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Marked SOHO-B.* sent\.$/)).toBeVisible();
+    expect(await pendingKeys()).toEqual([]);
+    expect(requests).toHaveLength(3);
+    expect(new Set(requests).size).toBe(1);
+    expect((await pool.query("select * from handoffs where operation_id=$1", [requests[0]])).rowCount).toBe(
+      1,
+    );
   } finally {
+    await pool.query("delete from handoffs where staff_id=$1", [staff]);
     await pool.query(
       "delete from batch_orders where batch_id in (select id from batches where created_by=$1)",
       [staff],

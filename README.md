@@ -70,6 +70,8 @@ Directory changes and their audit records commit together. The server rejects a 
 
 Open **Eligible orders** on the staff profile, select the origin store, and choose orders to create a planned batch. Open a batch from **Planned batches** to add orders, remove an order with a note, or cancel the batch. Cancellation keeps its history and releases orders that are still eligible for transfer.
 
+Choose **Mark sent** when the batch leaves. If Cents has closed an order since planning, the app lists its number so staff can remove it with a note before sending. If the phone loses the confirmation, reopening the orders page for that store checks the original departure. **Already saved** confirms that it was recorded.
+
 ## Cents webhook intake
 
 Cents posts order events to `/api/cents/webhook`. Configure one custom header for the business and map the two locations to their Cents store IDs. For the local fixture, use these test values in `.env.local`.

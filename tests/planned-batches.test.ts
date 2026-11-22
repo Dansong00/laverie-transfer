@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
+import { POST as receiveCentsWebhook } from "../app/api/cents/webhook/route";
 import { listEligibleOrders } from "../db/eligible-orders";
 import { sessionToken } from "../staff/session";
 import { saveBatch, plannedBatches, plannedMembers } from "../transfer/planned";
@@ -159,4 +160,155 @@ test("two staff editing the same version commit one change, and the other sees a
   expect(results.find((r) => !r.ok)).toMatchObject({ status: 409, error: "This batch changed, refresh." });
   expect(await plannedMembers(first.batchId)).toHaveLength(2);
   expect(await plannedBatches("soho")).toEqual([{ id: first.batchId, version: 2 }]);
+});
+
+const send = (expectedVersion = 1) => ({
+  ...edit("SOHO-B001", expectedVersion),
+  kind: "runAction",
+  action: "send",
+});
+
+test("send moves retained orders together and returns the saved departure after a lost confirmation", async () => {
+  await saveBatch(token, create(["1", "2", "3"]));
+  await saveBatch(token, { ...edit("SOHO-B001", 1), remove: [{ orderNumber: "2", note: "Collect here" }] });
+  const cmd = send(2);
+  expect(await saveBatch(token, cmd, true)).toBeNull();
+  expect(
+    (await pool.query("select * from operations where operation_id=$1", [cmd.operationId])).rowCount,
+  ).toBe(0);
+  const results = await Promise.all([saveBatch(token, cmd), saveBatch(token, cmd)]);
+  expect(results.map((r) => r.replayed).sort()).toEqual([false, true]);
+  for (const result of results)
+    expect(result).toMatchObject({ ok: true, result: { version: 3, sent: true } });
+  expect(await saveBatch(token, cmd, true)).toMatchObject({ replayed: true, result: { version: 3 } });
+  expect((await pool.query("select phase,active from batch_orders order by order_number")).rows).toEqual([
+    { phase: "sent", active: true },
+    { phase: "planned", active: false },
+    { phase: "sent", active: true },
+  ]);
+  const history = (await pool.query("select * from handoffs order by order_number")).rows;
+  expect(history.map((h) => h.order_number)).toEqual(["1", "3"]);
+  for (const row of history)
+    expect(row).toMatchObject({
+      staff_id: staffId,
+      operation_id: cmd.operationId,
+      from_phase: "planned",
+      to_phase: "sent",
+      at: history[0].at,
+    });
+  expect((await pool.query("select version from batches")).rows).toEqual([{ version: 3 }]);
+  expect((await pool.query("select * from operations where kind='send'")).rowCount).toBe(1);
+  expect(await plannedBatches("soho")).toEqual([]);
+  await expect(saveBatch(token, { ...cmd, expectedVersion: 3 })).rejects.toMatchObject({ status: 409 });
+  const other = await account("+12125550121");
+  await expect(saveBatch(other.token, cmd, true)).rejects.toMatchObject({ status: 409 });
+  await expect(saveBatch(token, { ...cmd, orderKeys: ["1"] })).rejects.toMatchObject({ status: 400 });
+});
+
+test("two staff sending the same version record one departure and replay the original outcomes", async () => {
+  await saveBatch(token, create(["1"]));
+  const other = await account("+12125550121");
+  const requests = [
+    [token, send()],
+    [other.token, send()],
+  ] as const;
+  const outcomes = await Promise.all(requests.map(([session, cmd]) => saveBatch(session, cmd)));
+  expect(outcomes.filter((r) => r.ok)).toHaveLength(1);
+  expect(outcomes.find((r) => !r.ok)).toMatchObject({ status: 409 });
+  for (const [i, [session, cmd]] of requests.entries())
+    expect(await saveBatch(session, cmd)).toEqual({ ...outcomes[i], replayed: true });
+  expect((await pool.query("select * from handoffs")).rowCount).toBe(1);
+  expect((await pool.query("select version from batches")).rows).toEqual([{ version: 2 }]);
+});
+
+test("send rejects the whole batch when Cents closes members after planning", async () => {
+  await saveBatch(token, create(["1", "2", "3"]));
+  vi.stubEnv("CENTS_WEBHOOK_HEADER_NAME", "X-Cents-Test");
+  vi.stubEnv("CENTS_WEBHOOK_HEADER_SECRET", "fixture-only");
+  vi.stubEnv("CENTS_STORE_ALLOWLIST", '{"soho":101,"east_village":102}');
+  async function closeOrder(orderCode: string, status: string) {
+    const response = await receiveCentsWebhook(
+      new Request("https://example.test/api/cents/webhook", {
+        method: "POST",
+        headers: { "X-Cents-Test": "fixture-only" },
+        body: JSON.stringify({
+          event: "order_updated",
+          order: { storeId: 101, orderCode, status, updatedAt: new Date().toISOString() },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+  }
+  await closeOrder("1", "CANCELLED");
+  await closeOrder("3", "COMPLETED");
+  const cmd = send();
+  expect(await saveBatch(token, cmd)).toMatchObject({
+    ok: false,
+    status: 409,
+    error: "Orders cannot be sent: 1, 3",
+  });
+  expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+  expect((await pool.query("select from batch_orders where phase='planned' and active")).rowCount).toBe(3);
+  expect(await plannedBatches("soho")).toEqual([{ id: cmd.batchId, version: 1 }]);
+  await saveBatch(token, {
+    ...edit(cmd.batchId, 1),
+    remove: ["1", "3"].map((orderNumber) => ({ orderNumber, note: "Closed in Cents" })),
+  });
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, replayed: true });
+  expect(await saveBatch(token, send(2))).toMatchObject({ ok: true, result: { version: 3 } });
+  await closeOrder("2", "COMPLETED");
+  expect((await pool.query("select phase,active from batch_orders where order_number='2'")).rows).toEqual([
+    { phase: "sent", active: true },
+  ]);
+});
+
+test("send sees a cancellation committed while waiting for the Cents row lock", async () => {
+  await saveBatch(token, create(["1"]));
+  const writer = await pool.connect();
+  const cmd = send();
+  try {
+    await writer.query("begin");
+    const [{ pid }] = (await writer.query("select pg_backend_pid() as pid")).rows;
+    await writer.query("update cents_orders set status='CANCELLED' where order_number='1'");
+    const sending = saveBatch(token, cmd);
+    try {
+      await vi.waitFor(async () => {
+        const waiting = await pool.query(
+          "select from pg_stat_activity where $1 = any(pg_blocking_pids(pid))",
+          [pid],
+        );
+        expect(waiting.rowCount).toBeGreaterThan(0);
+      });
+    } finally {
+      await writer.query("commit");
+    }
+    expect(await sending).toMatchObject({ ok: false, status: 409, error: "Orders cannot be sent: 1" });
+    expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+  } finally {
+    writer.release();
+  }
+});
+
+test("send rejects an empty or cancelled batch", async () => {
+  await saveBatch(token, create([]));
+  expect(await saveBatch(token, send())).toMatchObject({ ok: false, status: 409 });
+  await saveBatch(token, { ...edit("SOHO-B001", 1), kind: "deleteBatch" });
+  expect(await saveBatch(token, send(2))).toMatchObject({
+    ok: false,
+    status: 409,
+    error: "This batch was cancelled.",
+  });
+  expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+});
+
+test("a database error rolls back the whole departure and leaves the same request retryable", async () => {
+  await saveBatch(token, create(["1"]));
+  const cmd = send();
+  await pool.query("alter table batches add constraint test_version check (version=1)");
+  await expect(saveBatch(token, cmd)).rejects.toThrow();
+  expect(await saveBatch(token, cmd, true)).toBeNull();
+  expect((await pool.query("select from handoffs")).rowCount).toBe(0);
+  expect((await pool.query("select phase from batch_orders")).rows).toEqual([{ phase: "planned" }]);
+  await pool.query("alter table batches drop constraint test_version");
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, result: { version: 2 } });
 });

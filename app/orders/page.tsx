@@ -45,6 +45,7 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
           </Link>
         ))}
       </nav>
+      {typeof query.sent === "string" && <p role="status">Marked {query.sent} sent.</p>}
       {query.saved === "again" && <p role="status">Already saved.</p>}
       <Planner
         key={JSON.stringify([store, plan?.id, plan?.version])}
