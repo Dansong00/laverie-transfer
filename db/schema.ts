@@ -147,6 +147,7 @@ export const batches = pgTable(
       .notNull()
       .references(() => staff.id),
     createdAt: timestamp("created_at", tz).notNull(),
+    cancelledAt: timestamp("cancelled_at", tz),
     contentsChanged: boolean("contents_changed").notNull().default(false),
     contentsConfirmedAt: timestamp("contents_confirmed_at", tz),
     contentsConfirmedBy: uuid("contents_confirmed_by").references(() => staff.id),
@@ -186,6 +187,7 @@ export const batchOrders = pgTable(
       .notNull()
       .references(() => operations.operationId),
     removedAt: timestamp("removed_at", tz),
+    removalNote: text("removal_note"),
     removedByOp: uuid("removed_by_op").references(() => operations.operationId),
     active: boolean("active").notNull(),
   },

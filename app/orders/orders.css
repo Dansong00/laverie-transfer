@@ -8,3 +8,10 @@
 .eligible-orders ul { list-style: none; padding: 0; border-top: 1px solid #d8d8d5; }
 .eligible-orders li { display: grid; grid-template-columns: minmax(5rem, auto) 1fr; gap: .4rem 1rem; padding: 1rem 0; border-bottom: 1px solid #d8d8d5; overflow-wrap: anywhere; }
 .eligible-orders small { grid-column: 1 / -1; color: #555; }
+
+.eligible-orders fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.eligible-orders button { cursor: pointer; font: inherit; border-radius: 2rem; padding: .7rem 1rem; }
+.eligible-orders .save-plan { color: white; background: #a93e08; border: 1px solid #a93e08; }
+.eligible-orders .cancel-plan { margin-inline-start: .5rem; background: transparent; border: 1px solid #aaa; }
+.eligible-orders .removal-note { grid-column: 1 / -1; }
+.eligible-orders .removal-note input { display: block; width: 100%; box-sizing: border-box; padding: .6rem; font: inherit; }
