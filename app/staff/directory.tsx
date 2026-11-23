@@ -105,8 +105,8 @@ export function Directory({ actorId, members, locale }: {
             <p>
               {t(locale, person.role === "admin" ? "admin" : "staff")} · {t(locale, person.active ? "staffActive" : "staffDisabled")}
             </p>
-            {person.active && (
-              <div className="controls">
+            <div className="controls">
+              {person.active && (
                 <button
                   disabled={busy}
                   onClick={() => {
@@ -121,18 +121,21 @@ export function Directory({ actorId, members, locale }: {
                 >
                   {t(locale, person.role === "staff" ? "staffMakeAdmin" : "staffMakeStaff")}
                 </button>
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    if (window.confirm(t(locale, "staffConfirmDisable", { name: person.name }))) {
-                      void save({ kind: "disableStaff", targetStaffId: person.id });
-                    }
-                  }}
-                >
-                  {t(locale, "staffDisable")}
-                </button>
-              </div>
-            )}
+              )}
+              <button
+                disabled={busy}
+                onClick={() => {
+                  const prompt = t(locale, person.active ? "staffConfirmDisable" : "staffConfirmEnable", {
+                    name: person.name,
+                  });
+                  if (window.confirm(prompt)) {
+                    void save({ kind: person.active ? "disableStaff" : "enableStaff", targetStaffId: person.id });
+                  }
+                }}
+              >
+                {t(locale, person.active ? "staffDisable" : "staffEnable")}
+              </button>
+            </div>
           </li>
         ))}
       </ul>

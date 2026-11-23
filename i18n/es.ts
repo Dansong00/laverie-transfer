@@ -129,6 +129,8 @@ export const es = {
   staffMakeStaff: "Asignar rol de personal",
   staffConfirmMakeAdmin: "¿Asignar a {name} el rol de administrador?",
   staffConfirmMakeStaff: "¿Asignar a {name} el rol de personal?",
+  staffEnable: "Reactivar",
+  staffConfirmEnable: "¿Reactivar la cuenta de {name} con su rol actual? Necesitará un nuevo código para iniciar sesión.",
   staffDisable: "Deshabilitar",
   staffConfirmDisable: "¿Deshabilitar la cuenta de {name} y cerrar su sesión en todos los dispositivos?",
 } satisfies Record<keyof typeof en, string>;

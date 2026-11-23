@@ -127,6 +127,8 @@ export const en = {
   staffMakeStaff: "Make staff",
   staffConfirmMakeAdmin: "Change {name}’s role to admin?",
   staffConfirmMakeStaff: "Change {name}’s role to staff?",
+  staffEnable: "Re-enable",
+  staffConfirmEnable: "Re-enable {name} with their existing role? They will need a new sign-in code.",
   staffDisable: "Disable",
   staffConfirmDisable: "Disable {name} and sign them out of all devices?",
 };

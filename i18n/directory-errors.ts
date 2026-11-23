@@ -35,6 +35,10 @@ export const directoryErrors = {
     en: "Staff member not found.",
     es: "No se encontró al miembro del personal.",
   },
+  DIRECTORY_MEMBER_ALREADY_ACTIVE: {
+    en: "This staff member is already active.",
+    es: "Esta cuenta ya está activa.",
+  },
   DIRECTORY_MEMBER_DISABLED: {
     en: "This staff member is disabled.",
     es: "La cuenta de este miembro del personal está deshabilitada.",
