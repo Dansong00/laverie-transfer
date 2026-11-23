@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { operations, sessions, staff } from "../db/schema";
+import { operations, otpCodes, sessions, staff } from "../db/schema";
 import { directoryErrors } from "../i18n/directory-errors";
 import { getProfile, hasValidSessionToken } from "./session";
 import { normalizePhone } from "./settings";
@@ -20,6 +20,7 @@ type Role = "staff" | "admin";
 export type StaffChange =
   | { kind: "addStaff"; name: string; phone: string; role: Role }
   | { kind: "disableStaff"; targetStaffId: string }
+  | { kind: "enableStaff"; targetStaffId: string }
   | { kind: "updateStaffRole"; targetStaffId: string; role: Role };
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const summary = { id: staff.id, name: staff.name, role: staff.role, active: staff.active };
@@ -51,7 +52,8 @@ function parseChange(input: unknown): { operationId: string; change: StaffChange
     throw new DirectoryError(400, "DIRECTORY_MEMBER_REQUIRED");
   }
   const targetStaffId = input.targetStaffId.toLowerCase();
-  if (input.kind === "disableStaff") return { operationId, change: { kind: input.kind, targetStaffId } };
+  if (input.kind === "disableStaff" || input.kind === "enableStaff")
+    return { operationId, change: { kind: input.kind, targetStaffId } };
   if (input.kind === "updateStaffRole") {
     return { operationId, change: { kind: input.kind, targetStaffId, role: validRole(input.role) } };
   }
@@ -97,17 +99,19 @@ async function addStaff(tx: Transaction, change: Extract<StaffChange, { kind: "a
   return member;
 }
 
-async function disableStaff(tx: Transaction, id: string) {
+async function setStaffAccess(tx: Transaction, id: string, phone: string, active: boolean) {
   const now = new Date();
   const [member] = await tx
     .update(staff)
-    .set({ active: false, disabledAt: now })
+    .set({ active, disabledAt: active ? null : now })
     .where(eq(staff.id, id))
     .returning(summary);
   await tx
     .update(sessions)
     .set({ revokedAt: now })
     .where(and(eq(sessions.staffId, id), isNull(sessions.revokedAt)));
+  await tx.update(otpCodes).set({ consumedAt: now })
+    .where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)));
   return member;
 }
 
@@ -118,8 +122,12 @@ async function updateStaffRole(tx: Transaction, id: string, role: Role) {
 
 async function applyChange(tx: Transaction, change: StaffChange) {
   if (change.kind === "addStaff") return addStaff(tx, change);
-  const [person] = await tx.select(summary).from(staff).where(eq(staff.id, change.targetStaffId));
+  const [person] = await tx.select({ ...summary, phone: staff.phone }).from(staff).where(eq(staff.id, change.targetStaffId));
   if (!person) throw new DirectoryError(404, "DIRECTORY_MEMBER_NOT_FOUND");
+  if (change.kind === "enableStaff") {
+    if (person.active) throw new DirectoryError(409, "DIRECTORY_MEMBER_ALREADY_ACTIVE");
+    return setStaffAccess(tx, person.id, person.phone, true);
+  }
   if (!person.active) throw new DirectoryError(409, "DIRECTORY_MEMBER_DISABLED");
   if (person.role === "admin" && (change.kind === "disableStaff" || change.role === "staff")) {
     const [other] = await tx
@@ -136,7 +144,7 @@ async function applyChange(tx: Transaction, change: StaffChange) {
       .limit(1);
     if (!other) throw new DirectoryError(409, "DIRECTORY_LAST_ACTIVE_ADMIN");
   }
-  if (change.kind === "disableStaff") return disableStaff(tx, person.id);
+  if (change.kind === "disableStaff") return setStaffAccess(tx, person.id, person.phone, false);
   return updateStaffRole(tx, person.id, change.role);
 }
 
