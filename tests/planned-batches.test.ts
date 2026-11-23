@@ -87,7 +87,14 @@ test("edits require a note, check version, and roll back removals if an addition
   expect(await saveBatch(token, rejected)).toMatchObject({ ok: false, status: 409 });
   expect(await plannedMembers(cmd.batchId)).toEqual([{ orderNumber: "1" }]);
   await pool.query("update cents_orders set status='IN_PROGRESS' where order_number='2'");
-  expect(await saveBatch(token, rejected)).toMatchObject({ ok: false, replayed: true });
+  const failed = {
+    ok: false, status: 409, error: "BATCH_ORDERS_INELIGIBLE",
+    message: "Orders no longer eligible: 2", values: { orders: "2" },
+  };
+  const stored = await pool.query("select result from operations where operation_id=$1", [cmd.operationId]);
+  expect(stored.rows[0].result).toEqual(failed);
+  expect(await saveBatch(token, rejected, true)).toEqual({ ...failed, replayed: true });
+  expect(await saveBatch(token, rejected)).toEqual({ ...failed, replayed: true });
   expect(await saveBatch(token, { ...rejected, operationId: randomUUID() })).toMatchObject({
     ok: true,
     result: { version: 2 },
@@ -115,6 +122,19 @@ test("retries replay across later versions, conflicts reject changed actors or o
     result: { version: 1 },
   });
   await expect(saveBatch(undefined, cmd)).rejects.toMatchObject({ status: 401 });
+});
+
+test("status checks and retries preserve older English-only failures", async () => {
+  const cmd = create(["missing"]);
+  await saveBatch(token, cmd);
+  const legacy = { ok: false, status: 409, error: "Previously saved failure." };
+  await pool.query("update operations set result=$1 where operation_id=$2", [legacy, cmd.operationId]);
+  const expected = {
+    ok: false, status: 409, error: "BATCH_LEGACY_ERROR", message: legacy.error, replayed: true,
+  };
+  expect(await saveBatch(token, cmd, true)).toEqual(expected);
+  expect(await saveBatch(token, cmd)).toEqual(expected);
+  expect(await plannedBatches("soho")).toEqual([]);
 });
 
 test("concurrent plans cannot claim the same order, and failed plans leave no batch or counter increment", async () => {
@@ -162,7 +182,9 @@ test("two staff editing the same version commit one change, and the other sees a
   const second = { ...edit("SOHO-B001", 1), add: ["3"] };
   const results = await Promise.all([saveBatch(token, first), saveBatch(other.token, second)]);
   expect(results.filter((r) => r.ok)).toHaveLength(1);
-  expect(results.find((r) => !r.ok)).toMatchObject({ status: 409, error: "This batch changed, refresh." });
+  expect(results.find((r) => !r.ok)).toMatchObject({
+    status: 409, error: "BATCH_VERSION_CONFLICT", message: "This batch changed, refresh.",
+  });
   expect(await plannedMembers(first.batchId)).toHaveLength(2);
   expect(await plannedBatches("soho")).toEqual([{ id: first.batchId, version: 2 }]);
 });
@@ -250,7 +272,9 @@ test("send rejects the whole batch when Cents closes members after planning", as
   expect(await saveBatch(token, cmd)).toMatchObject({
     ok: false,
     status: 409,
-    error: "Orders cannot be sent: 1, 3",
+    error: "BATCH_ORDERS_CANNOT_SEND",
+    message: "Orders cannot be sent: 1, 3",
+    values: { orders: "1, 3" },
   });
   expect((await pool.query("select from handoffs")).rowCount).toBe(0);
   expect((await pool.query("select from batch_orders where phase='planned' and active")).rowCount).toBe(3);
@@ -287,7 +311,9 @@ test("send sees a cancellation committed while waiting for the Cents row lock", 
     } finally {
       await writer.query("commit");
     }
-    expect(await sending).toMatchObject({ ok: false, status: 409, error: "Orders cannot be sent: 1" });
+    expect(await sending).toMatchObject({
+      ok: false, status: 409, error: "BATCH_ORDERS_CANNOT_SEND", message: "Orders cannot be sent: 1",
+    });
     expect((await pool.query("select from handoffs")).rowCount).toBe(0);
   } finally {
     writer.release();
@@ -301,7 +327,8 @@ test("send rejects an empty or cancelled batch", async () => {
   expect(await saveBatch(token, send(2))).toMatchObject({
     ok: false,
     status: 409,
-    error: "This batch was cancelled.",
+    error: "BATCH_CANCELLED",
+    message: "This batch was cancelled.",
   });
   expect((await pool.query("select from handoffs")).rowCount).toBe(0);
 });
@@ -368,7 +395,8 @@ test("a corrected batch needs a versioned contents confirmation before return, i
   expect(await saveBatch(token, blocked)).toMatchObject({
     ok: false,
     status: 409,
-    error: "Contents changed, confirm before return.",
+    error: "BATCH_CONTENTS_CONFIRMATION_REQUIRED",
+    message: "Contents changed, confirm before return.",
   });
   expect(await saveBatch(token, { ...confirm(6), store: "soho" })).toMatchObject({ ok: false, status: 403 });
   const cmd = confirm(6);
@@ -430,7 +458,8 @@ test("sent corrections are remove-only, validate every member and never reopen a
   expect(await saveBatch(token, { ...edit("SOHO-B001", 3), add: ["3"] })).toMatchObject({ ok: false });
   expect(await saveBatch(token, confirm(3))).toMatchObject({
     ok: false,
-    error: "Receive the batch before confirming its contents.",
+    error: "BATCH_RECEIPT_REQUIRED",
+    message: "Receive the batch before confirming its contents.",
   });
   expect(await saveBatch(token, receive(3))).toMatchObject({ ok: true });
   expect(await saveBatch(token, receive(4))).toMatchObject({ ok: false });
@@ -632,12 +661,12 @@ test("store actions use one version and one operation for the selected orders, i
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "processing", ready: 1, total: 4 },
   ]);
-  for (const [cmd, error] of [
+  for (const [cmd, message] of [
     [storeOrders(6, "markReady", "1", "2"), "Orders cannot move from processing: 1"],
     [storeOrders(6, "markReady", "2", "5"), "Orders cannot move from processing: 5"],
     [storeOrders(5, "markReady", "2", "3"), "This batch changed, refresh."],
   ] as const) {
-    expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 409, error });
+    expect(await saveBatch(token, cmd)).toMatchObject({ ok: false, status: 409, message });
     expect((await pool.query("select from handoffs where operation_id=$1", [cmd.operationId])).rowCount).toBe(
       0,
     );
@@ -704,7 +733,8 @@ test("staff reverse one store phase at a time with a reason and keep both handof
     status: 400,
   });
   await expect(saveBatch(token, { ...orderBack(5), reason: "x".repeat(1001) })).rejects.toMatchObject({
-    status: 400,
+    status: 400, code: "BATCH_CORRECTION_REASON_TOO_LONG",
+    message: "Use at most 1000 characters for the correction reason.", values: { limit: 1000 },
   });
   const wrongStore = { ...orderBack(5), store: "soho" };
   expect(await saveBatch(token, wrongStore)).toMatchObject({ ok: false, status: 403 });

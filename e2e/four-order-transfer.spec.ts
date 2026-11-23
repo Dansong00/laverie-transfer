@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
+import { t } from "../i18n";
+import { en } from "../i18n/en";
 import fixture from "../fixtures/order-created.json";
 import { cleanTransfers, signIn } from "./transfer-fixtures";
 
@@ -59,36 +61,44 @@ test("four SoHo orders complete a round trip with a Cents completion and a hando
     for (const ticket of tickets) {
       await soho.getByRole("checkbox", { name: "#" + ticket, exact: true }).check();
     }
-    await soho.getByRole("button", { name: "Create planned batch" }).click();
+    await soho.getByRole("button", { name: en.ordersCreatePlan }).click();
     const batch = await soho.getByRole("heading", { name: /^SOHO-B/ }).innerText();
-    await soho.getByRole("button", { name: "Mark sent", exact: true }).click();
-    await expect(soho.getByText("Marked " + batch + " sent.")).toBeVisible();
+    await soho.getByRole("button", { name: en.ordersMarkSent, exact: true }).click();
+    await expect(soho.getByText(t("en", "ordersSentStatus", { batch }))).toBeVisible();
 
     await eastVillage.goto("/board?store=east_village");
-    const arrivals = eastVillage.getByRole("region", { name: "Arriving" });
+    const arrivals = eastVillage.getByRole("region", { name: en.boardArriving });
     await arrivals.getByRole("link", { name: batch, exact: true }).click();
-    await eastVillage.getByRole("button", { name: "Mark received" }).click();
-    await eastVillage.getByRole("button", { name: "Start processing 4 received orders" }).click();
-    await eastVillage.getByRole("button", { name: "Mark 4 remaining ready" }).click();
-    await expect(eastVillage.getByText("Ready for return · 4 of 4 ready")).toBeVisible();
-    await eastVillage.getByRole("button", { name: "Mark return sent" }).click();
-    await expect(eastVillage.getByText("Returning · 4 returning")).toBeVisible();
+    await eastVillage.getByRole("button", { name: en.boardReceive }).click();
+    await eastVillage.getByRole("button", { name: t("en", "boardStartProcessingMany", { count: 4 }) }).click();
+    await eastVillage.getByRole("button", { name: t("en", "boardMarkRemainingReady", { count: 4 }) }).click();
+    await expect(
+      eastVillage.getByText(`${en.phaseReady} · ${t("en", "boardReadyCount", { count: 4, total: 4 })}`),
+    ).toBeVisible();
+    await eastVillage.getByRole("button", { name: en.boardSendReturn }).click();
+    await expect(
+      eastVillage.getByText(`${en.boardReturning} · ${t("en", "boardReturningCount", { total: 4 })}`),
+    ).toBeVisible();
     await expectCentsState("SUBMITTED", "order_created");
 
     await deliver("order_completed");
     await expectCentsState("COMPLETED", "order_completed");
     await soho.goto("/board?store=soho");
-    const returns = soho.getByRole("region", { name: "Returning" });
+    const returns = soho.getByRole("region", { name: en.boardReturning });
     await returns.getByRole("link", { name: batch, exact: true }).click();
-    await soho.getByRole("button", { name: "Acknowledge return" }).click();
-    await expect(soho.getByText("Recently returned · 4 of 4 returned")).toBeVisible();
+    await soho.getByRole("button", { name: en.boardAcknowledgeReturn }).click();
+    await expect(
+      soho.getByText(`${en.boardRecentlyReturned} · ${t("en", "boardReturnedCount", { count: 4, total: 4 })}`),
+    ).toBeVisible();
 
     await soho.reload();
-    await expect(soho.getByRole("heading", { name: "Handoff history" })).toBeVisible();
+    await expect(soho.getByRole("heading", { name: en.handoffHistory })).toBeVisible();
     for (const ticket of tickets) {
       const history = soho.locator("ol > li").filter({ has: soho.getByText("#" + ticket, { exact: true }) });
       await expect(history).toHaveCount(6);
-      await expect(history).toContainText(["Sent", "Received", "Processing", "Ready for return", "Return sent", "Returned"]);
+      await expect(history).toContainText([
+        en.phaseSent, en.phaseReceived, en.phaseProcessing, en.phaseReady, en.phaseReturnSent, en.phaseReturned,
+      ]);
     }
     const [originStaff, destinationStaff] = staff;
     const operations = await pool.query(

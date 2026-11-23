@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t, type Locale } from "../i18n";
+import { translateApiError } from "../i18n/api-errors";
 import type { StoreId } from "../db/eligible-orders";
 import type { BatchChange } from "../transfer/commands";
 
@@ -82,7 +83,7 @@ export function useBatchChange(staffId: string, origin: StoreId, locale: Locale)
         localStorage.removeItem(key);
         setUncertain(false);
         if (!response.ok) {
-          setMessage(result.error);
+          setMessage(translateApiError(locale, result));
           return;
         }
         const params = new URLSearchParams({ store: origin });

@@ -110,11 +110,11 @@ export async function changeContents(
     .orderBy(asc(batchOrders.orderNumber))
     .for("update");
   if (members.some((m) => !m.active || !tripPhases.includes(m.phase)))
-    throw new BatchError(409, "This action requires an outbound batch.");
+    throw new BatchError(409, "BATCH_OUTBOUND_REQUIRED");
   if (change.kind === "correctSentMembership") {
     for (const { orderKey, reason } of change.remove) {
       const member = members.find((m) => m.orderNumber === orderKey.orderNumber);
-      if (!member) throw new BatchError(409, "Order is no longer in this batch: " + orderKey.orderNumber);
+      if (!member) throw new BatchError(409, "BATCH_ORDER_NOT_IN_BATCH", { orderNumber: orderKey.orderNumber });
       const [departure] = await tx
         .select({ id: handoffs.id })
         .from(handoffs)
@@ -128,7 +128,7 @@ export async function changeContents(
         )
         .orderBy(desc(handoffs.at))
         .limit(1);
-      if (!departure) throw new BatchError(409, "No departure recorded for order " + member.orderNumber);
+      if (!departure) throw new BatchError(409, "BATCH_DEPARTURE_NOT_FOUND", { orderNumber: member.orderNumber });
       await tx
         .update(batchOrders)
         .set({ active: false, removedAt: at, removedByOp: operationId, removalNote: reason })
@@ -156,15 +156,15 @@ export async function changeContents(
       .where(eq(batches.id, batch.id));
     return;
   }
-  if (change.store !== batch.destination) throw new BatchError(403, "Select the store holding this batch.");
+  if (change.store !== batch.destination) throw new BatchError(403, "BATCH_WRONG_HOLDING_STORE");
   const orderKeys = members.map((m) => ({ storeId: change.origin, orderNumber: m.orderNumber }));
   const [receipt] = await tx
     .select({ received: receiptRecorded(batch.id) })
     .from(batches)
     .where(eq(batches.id, batch.id));
   if (!receipt.received || members.some((m) => m.phase === "sent"))
-    throw new BatchError(409, "Receive the batch before confirming its contents.");
-  if (!batch.contentsChanged) throw new BatchError(409, "There are no changed contents to confirm.");
+    throw new BatchError(409, "BATCH_RECEIPT_REQUIRED");
+  if (!batch.contentsChanged) throw new BatchError(409, "BATCH_NO_CONTENTS_CHANGES");
   await tx
     .update(batches)
     .set({

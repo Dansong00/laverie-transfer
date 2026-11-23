@@ -1,6 +1,8 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
+import { directoryErrors } from "../i18n/directory-errors";
+import { en } from "../i18n/en";
 
 test("admin can add staff, change a role, disable access and keep the last admin", async ({
   page,
@@ -34,26 +36,26 @@ test("admin can add staff, change a role, disable access and keep the last admin
     ]);
     await page.goto("/");
     await expect(page.getByText(phone)).toBeVisible();
-    await page.getByRole("link", { name: "Staff admin" }).click();
-    await page.getByText("Add staff", { exact: true }).click();
-    await page.getByLabel("Name", { exact: true }).fill("Jordan");
-    await page.getByLabel("Mobile number").fill(newPhone);
-    await page.getByRole("button", { name: "Add staff member" }).click();
+    await page.getByRole("link", { name: en.directory }).click();
+    await page.getByText(en.staffAdd, { exact: true }).click();
+    await page.getByLabel(en.name, { exact: true }).fill("Jordan");
+    await page.getByLabel(en.mobileNumber).fill(newPhone);
+    await page.getByRole("button", { name: en.staffAddMember }).click();
     const member = page.getByRole("listitem").filter({ hasText: "Jordan" });
     await expect(member).toContainText(newPhone);
     page.on("dialog", (dialog) => dialog.accept());
-    await member.getByRole("button", { name: "Make admin" }).click();
-    await expect(member).toContainText("Admin · Active");
-    await member.getByRole("button", { name: "Disable" }).click();
-    await expect(member).toContainText("Admin · Disabled");
+    await member.getByRole("button", { name: en.staffMakeAdmin }).click();
+    await expect(member).toContainText(`${en.admin} · ${en.staffActive}`);
+    await member.getByRole("button", { name: en.staffDisable }).click();
+    await expect(member).toContainText(`${en.admin} · ${en.staffDisabled}`);
     await page
       .getByRole("listitem")
       .filter({ hasText: phone })
-      .getByRole("button", { name: "Make staff" })
+      .getByRole("button", { name: en.staffMakeStaff })
       .click();
-    await expect(page.getByRole("status")).toContainText("last active admin");
+    await expect(page.getByRole("status")).toHaveText(directoryErrors.DIRECTORY_LAST_ACTIVE_ADMIN.en);
     await page.reload();
-    await expect(member).toContainText("Disabled");
+    await expect(member).toContainText(en.staffDisabled);
   } finally {
     await pool.query("delete from operations where staff_id=$1", [admin]);
     await pool.query("delete from sessions where staff_id=$1", [admin]);

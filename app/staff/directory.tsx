@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { t, type Locale } from "../../i18n";
+import { translateApiError } from "../../i18n/api-errors";
 import type { DirectoryMember, StaffChange } from "../../staff/directory";
 
 export function Directory({ actorId, members, locale }: {
@@ -47,7 +48,7 @@ export function Directory({ actorId, members, locale }: {
         return;
       }
       if (!response.ok) {
-        setMessage(result.error);
+        setMessage(translateApiError(locale, result));
         return;
       }
       setMessage(t(locale, result.replayed ? "alreadySaved" : "saved"));

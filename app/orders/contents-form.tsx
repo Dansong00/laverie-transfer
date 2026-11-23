@@ -19,7 +19,7 @@ export type SentTrip = Awaited<ReturnType<typeof contentsHistory>> & {
 function HistoryTime({ locale, at }: { locale: Locale; at: Date | string }) {
   const date = new Date(at);
   return (
-    <time dateTime={date.toISOString()}>
+    <time dateTime={date.toISOString()} suppressHydrationWarning>
       {formatLocalDate(locale, date, "medium")}
     </time>
   );

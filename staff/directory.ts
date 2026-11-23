@@ -2,15 +2,16 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { operations, sessions, staff } from "../db/schema";
+import { directoryErrors } from "../i18n/directory-errors";
 import { getProfile, hasValidSessionToken } from "./session";
 import { normalizePhone } from "./settings";
 
 export class DirectoryError extends Error {
   constructor(
     readonly status: number,
-    message: string,
+    readonly code: keyof typeof directoryErrors,
   ) {
-    super(message);
+    super(directoryErrors[code].en);
   }
 }
 
@@ -26,7 +27,7 @@ export type DirectoryMember = Pick<typeof staff.$inferSelect, "id" | "name" | "r
 type Member = Pick<typeof staff.$inferSelect, keyof typeof summary>;
 
 function validRole(role: unknown): Role {
-  if (role !== "admin" && role !== "staff") throw new DirectoryError(400, "Choose a valid staff role.");
+  if (role !== "admin" && role !== "staff") throw new DirectoryError(400, "DIRECTORY_INVALID_ROLE");
   return role;
 }
 
@@ -36,36 +37,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseChange(input: unknown): { operationId: string; change: StaffChange } {
   if (!isRecord(input) || typeof input.operationId !== "string" || !uuid.test(input.operationId)) {
-    throw new DirectoryError(400, "Invalid staff change.");
+    throw new DirectoryError(400, "DIRECTORY_INVALID_CHANGE");
   }
   const operationId = input.operationId.toLowerCase();
   if (input.kind === "addStaff") {
     const name = typeof input.name === "string" ? input.name.trim() : "";
     const phone = normalizePhone(input.phone);
     if (!name || name.length > 120 || !phone)
-      throw new DirectoryError(400, "Enter a name and a valid mobile number.");
+      throw new DirectoryError(400, "DIRECTORY_INVALID_CONTACT");
     return { operationId, change: { kind: input.kind, name, phone, role: validRole(input.role) } };
   }
   if (typeof input.targetStaffId !== "string" || !uuid.test(input.targetStaffId)) {
-    throw new DirectoryError(400, "Choose a staff member.");
+    throw new DirectoryError(400, "DIRECTORY_MEMBER_REQUIRED");
   }
   const targetStaffId = input.targetStaffId.toLowerCase();
   if (input.kind === "disableStaff") return { operationId, change: { kind: input.kind, targetStaffId } };
   if (input.kind === "updateStaffRole") {
     return { operationId, change: { kind: input.kind, targetStaffId, role: validRole(input.role) } };
   }
-  throw new DirectoryError(400, "Unknown staff change.");
+  throw new DirectoryError(400, "DIRECTORY_UNKNOWN_CHANGE");
 }
 
 async function requireAdmin(token: string | undefined, tx: Transaction) {
   const actor = await getProfile(token, tx);
-  if (!actor) throw new DirectoryError(401, "Sign in required.");
-  if (actor.role !== "admin") throw new DirectoryError(403, "Admin access required.");
+  if (!actor) throw new DirectoryError(401, "DIRECTORY_SIGN_IN_REQUIRED");
+  if (actor.role !== "admin") throw new DirectoryError(403, "DIRECTORY_ADMIN_REQUIRED");
   return actor.staffId;
 }
 
 export async function readDirectory(token: string | undefined) {
-  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "DIRECTORY_SIGN_IN_REQUIRED");
   return getDb().transaction(async (tx) => {
     await tx.execute(sql`lock table staff in share mode`);
     const actorId = await requireAdmin(token, tx);
@@ -92,7 +93,7 @@ async function addStaff(tx: Transaction, change: Extract<StaffChange, { kind: "a
     })
     .onConflictDoNothing({ target: staff.phone })
     .returning(summary);
-  if (!member) throw new DirectoryError(409, "That number is already registered.");
+  if (!member) throw new DirectoryError(409, "DIRECTORY_PHONE_ALREADY_REGISTERED");
   return member;
 }
 
@@ -118,8 +119,8 @@ async function updateStaffRole(tx: Transaction, id: string, role: Role) {
 async function applyChange(tx: Transaction, change: StaffChange) {
   if (change.kind === "addStaff") return addStaff(tx, change);
   const [person] = await tx.select(summary).from(staff).where(eq(staff.id, change.targetStaffId));
-  if (!person) throw new DirectoryError(404, "Staff member not found.");
-  if (!person.active) throw new DirectoryError(409, "This staff member is disabled.");
+  if (!person) throw new DirectoryError(404, "DIRECTORY_MEMBER_NOT_FOUND");
+  if (!person.active) throw new DirectoryError(409, "DIRECTORY_MEMBER_DISABLED");
   if (person.role === "admin" && (change.kind === "disableStaff" || change.role === "staff")) {
     const [other] = await tx
       .select({ id: staff.id })
@@ -133,14 +134,14 @@ async function applyChange(tx: Transaction, change: StaffChange) {
         ),
       )
       .limit(1);
-    if (!other) throw new DirectoryError(409, "The last active admin must keep admin access.");
+    if (!other) throw new DirectoryError(409, "DIRECTORY_LAST_ACTIVE_ADMIN");
   }
   if (change.kind === "disableStaff") return disableStaff(tx, person.id);
   return updateStaffRole(tx, person.id, change.role);
 }
 
 export async function saveStaffChange(token: string | undefined, input: unknown) {
-  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new DirectoryError(401, "DIRECTORY_SIGN_IN_REQUIRED");
   return getDb().transaction(async (tx) => {
     // Shared with first-admin bootstrap. Serialize directory edits before checking
     // the actor, counting other admins, or changing staff and session rows.
@@ -155,7 +156,7 @@ export async function saveStaffChange(token: string | undefined, input: unknown)
         previous.kind !== change.kind ||
         previous.requestHash !== requestHash
       ) {
-        throw new DirectoryError(409, "This operation ID is already in use.");
+        throw new DirectoryError(409, "DIRECTORY_OPERATION_ID_CONFLICT");
       }
       return { member: previous.result as Member, replayed: true };
     }
@@ -172,7 +173,7 @@ export async function saveStaffChange(token: string | undefined, input: unknown)
       })
       .onConflictDoNothing()
       .returning({ id: operations.operationId });
-    if (!saved.length) throw new DirectoryError(409, "This operation ID is already in use.");
+    if (!saved.length) throw new DirectoryError(409, "DIRECTORY_OPERATION_ID_CONFLICT");
     return { member, replayed: false };
   });
 }

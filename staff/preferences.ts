@@ -15,12 +15,12 @@ export async function getStaffPreferences(staffId: string) {
 }
 
 export async function updateStaffPreferences(token: string | undefined, input: unknown) {
-  if (!hasValidSessionToken(token)) throw new BatchError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new BatchError(401, "BATCH_SIGN_IN_REQUIRED");
   return getDb().transaction(async (tx) => {
     const actor = await getProfile(token, tx);
-    if (!actor) throw new BatchError(401, "Sign in required.");
+    if (!actor) throw new BatchError(401, "BATCH_SIGN_IN_REQUIRED");
     if (!Array.isArray(input) || !input.every((s) => boardSections.includes(s)))
-      throw new BatchError(400, "Choose valid board sections.");
+      throw new BatchError(400, "BATCH_INVALID_BOARD_SECTIONS");
     const sections = boardSections.filter((s) => input.includes(s));
     const saved = await tx
       .insert(staffPreferences)
@@ -55,8 +55,8 @@ export async function getStaffLocale(staffId: string, db: Pick<ReturnType<typeof
 export async function updateStaffLocale(token: string | undefined, value: unknown) {
   return getDb().transaction(async tx => {
     const actor = await getProfile(token, tx);
-    if (!actor) throw new BatchError(401, "Sign in required.");
-    if (!isLocale(value)) throw new BatchError(400, "Choose a supported language.");
+    if (!actor) throw new BatchError(401, "BATCH_SIGN_IN_REQUIRED");
+    if (!isLocale(value)) throw new BatchError(400, "BATCH_UNSUPPORTED_LANGUAGE");
     const saved = await tx.insert(staffPreferences).values({ staffId: actor.staffId, locale: value })
       .onConflictDoUpdate({
         target: staffPreferences.staffId,
