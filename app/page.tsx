@@ -1,9 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
-import { cookies } from "next/headers";
+import { t } from "../i18n";
 import { Suspense } from "react";
-import { getProfile, sessionCookie } from "../staff/session";
-import { signOut } from "./sign-in-actions";
+import { requestLocale, requestProfile } from "../staff/request-profile";
+import { saveLanguage, signOut } from "./sign-in-actions";
 import { SignIn } from "./sign-in";
 import "./sign-in.css";
 
@@ -11,24 +11,33 @@ export default function Home() {
   return (
     <main className="sign-in">
       <Image className="wordmark" src="/brand/laverie.webp" alt="Laverie" width={1500} height={428} priority />
-      <Suspense fallback={<p>Loading sign-in…</p>}><StaffAccess /></Suspense>
+      <Suspense fallback={null}><StaffAccess /></Suspense>
     </main>
   );
 }
 
 async function StaffAccess() {
-  const actor = await getProfile((await cookies()).get(sessionCookie)?.value);
+  const actor = await requestProfile();
   if (!actor) return <SignIn />;
+  const locale = await requestLocale();
   return <>
-    <h1>Profile</h1>
+    <h1>{t(locale, "profile")}</h1>
     <dl className="profile">
-      <dt>Name</dt><dd>{actor.name}</dd>
-      <dt>Role</dt><dd>{actor.role === "admin" ? "Admin" : "Staff"}</dd>
-      {actor.phone && <><dt>Registered number</dt><dd>{actor.phone}</dd></>}
+      <dt>{t(locale, "name")}</dt><dd>{actor.name}</dd>
+      <dt>{t(locale, "role")}</dt><dd>{t(locale, actor.role === "admin" ? "admin" : "staff")}</dd>
+      {actor.phone && <><dt>{t(locale, "phone")}</dt><dd>{actor.phone}</dd></>}
     </dl>
-    <Link className="link" href="/board">Transfer board</Link>
-    <Link className="link" href="/orders">Eligible orders</Link>
-    {actor.role === "admin" && <Link className="link" href="/staff">Staff admin</Link>}
-    <form action={signOut}><button className="primary">Sign out</button></form>
+    <Link className="link" href="/board">{t(locale, "board")}</Link>
+    <Link className="link" href="/orders">{t(locale, "orders")}</Link>
+    {actor.role === "admin" && <Link className="link" href="/staff">{t(locale, "directory")}</Link>}
+    <form action={saveLanguage}>
+      <label htmlFor="locale">{t(locale, "language")}</label>
+      <select id="locale" name="locale" defaultValue={locale} key={locale}>
+        <option value="en" lang="en">English</option>
+        <option value="es" lang="es">Español</option>
+      </select>
+      <button className="link">{t(locale, "saveLanguage")}</button>
+    </form>
+    <form action={signOut}><button className="primary">{t(locale, "signOut")}</button></form>
   </>;
 }

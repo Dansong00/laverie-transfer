@@ -1,12 +1,11 @@
 import { sentBatchesAt, contentsHistory } from "../../transfer/contents";
 import { plannedBatches, plannedMembers } from "../../transfer/planned";
 import { Planner } from "./planner";
-import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { listEligibleOrders, stores } from "../../db/eligible-orders";
-import { readSession, sessionCookie } from "../../staff/session";
+import { requestProfile } from "../../staff/request-profile";
 import "../sign-in.css";
 import "./orders.css";
 
@@ -25,7 +24,7 @@ export default function Orders(props: PageProps<"/orders">) {
 }
 
 async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
-  const actor = await readSession((await cookies()).get(sessionCookie)?.value);
+  const actor = await requestProfile();
   if (!actor) redirect("/");
   const query = await searchParams;
   const store = query.store ?? "soho";

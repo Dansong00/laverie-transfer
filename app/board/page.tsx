@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { stores } from "../../db/eligible-orders";
 import { boardSections } from "../../db/schema";
-import { readSession, sessionCookie } from "../../staff/session";
+import { requestProfile } from "../../staff/request-profile";
 import { getStaffPreferences } from "../../staff/preferences";
 import { getBatch, listBatchesForStore, sectionNames } from "../../transfer/board";
 import { BoardChanges, CorrectionForm, StoreButton } from "./store-actions";
@@ -38,7 +37,7 @@ export default function BoardPage(props: PageProps<"/board">) {
 }
 
 async function Board({ searchParams }: PageProps<"/board">) {
-  const actor = await readSession((await cookies()).get(sessionCookie)?.value);
+  const actor = await requestProfile();
   if (!actor) redirect("/");
   const query = await searchParams;
   const store = query.store ?? "soho";

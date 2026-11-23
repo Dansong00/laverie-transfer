@@ -1,3 +1,4 @@
+import { locales } from "../i18n";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -134,7 +135,8 @@ export const staffPreferences = pgTable("staff_preferences", {
     .primaryKey()
     .references(() => staff.id),
   boardSections: text("board_sections").array().notNull().default(boardSectionsDefault),
-});
+  locale: text("locale", { enum: locales }).notNull().default("en"),
+}, (table) => [check("staff_preferences_locale_valid", sql`${table.locale} in ('en', 'es')`)]);
 
 export const batches = pgTable(
   "batches",

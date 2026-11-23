@@ -50,6 +50,13 @@
       "when": 1795388594524,
       "tag": "0006_return_acknowledgment",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795443785796,
+      "tag": "0007_staff_locale",
+      "breakpoints": true
     }
   ]
 }
