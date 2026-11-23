@@ -107,13 +107,41 @@ test("concurrent and late events preserve the latest snapshot independently per 
   ]);
 });
 
-test.each(["COMPLETED", "CANCELLED"])("equal-time %s wins and a later reopen is flagged", async status => {
+test.each([
+  ["COMPLETED", "COMPLETED"], ["Completed", "COMPLETED"], [" completed ", "COMPLETED"],
+  ["CANCELLED", "CANCELLED"], ["CANCELED", "CANCELLED"],
+])("equal-time %s wins as %s and a later reopen is flagged", async (status, canonical) => {
   await deliver({});
-  await deliver({ status }, status === "COMPLETED" ? "order_completed" : "order_updated");
+  await deliver({ status }, canonical === "COMPLETED" ? "order_completed" : "order_updated");
   const [terminal] = await snapshots();
-  expect(terminal.status).toBe(status);
+  expect(terminal.status).toBe(canonical);
   await deliver({ status: "IN_PROGRESS", updatedAt: "2026-11-17T00:00:00Z" });
   expect(await snapshots()).toEqual([terminal]);
+  expect((await rows()).at(-1)).toMatchObject({ needs_review: true, review_reason: "reopen" });
+});
+
+test("unknown statuses retain redacted receipts without creating or updating snapshots", async () => {
+  const unknown = { status: "Void - pending" };
+  await deliver(unknown);
+  expect(await snapshots()).toEqual([]);
+  await deliver({});
+  const open = await snapshots();
+  await deliver({ ...unknown, updatedAt: "2026-11-17T00:00:00Z" });
+  expect(await snapshots()).toEqual(open);
+  const receipts = (await rows()).filter(row => row.body.order.status === unknown.status);
+  expect(receipts).toHaveLength(2);
+  for (const row of receipts) {
+    expect(row).toMatchObject({ needs_review: true, review_reason: "unknown_status" });
+    expect(row.body.customer).toEqual({ firstName: "Maya", lastInitial: "T" });
+  }
+});
+
+test("a terminal spelling already stored by an older webhook still blocks a reopen", async () => {
+  await deliver({});
+  await pool.query("update cents_orders set status='Canceled' where store_id='soho' and order_number='00314'");
+  const closed = await snapshots();
+  await deliver({ status: "IN_PROGRESS", updatedAt: "2026-11-17T00:00:00Z" });
+  expect(await snapshots()).toEqual(closed);
   expect((await rows()).at(-1)).toMatchObject({ needs_review: true, review_reason: "reopen" });
 });
 
