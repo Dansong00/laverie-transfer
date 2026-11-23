@@ -106,8 +106,8 @@ async function advanceReturn(
   at: Date,
 ) {
   const acknowledging = change.action === "acknowledgeReturn";
-  if (acknowledging && (batch.origin !== "soho" || change.store !== batch.origin))
-    throw new BatchError(403, "Acknowledge the return at SoHo.");
+  if (acknowledging && change.store !== batch.origin)
+    throw new BatchError(403, "Acknowledge the return at the origin store.");
   if (!acknowledging && change.store !== batch.destination)
     throw new BatchError(403, "Select the store sending the return.");
   if (batch.contentsChanged) throw new BatchError(409, "Contents changed, confirm before return.");

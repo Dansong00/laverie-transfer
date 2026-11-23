@@ -157,57 +157,62 @@ async function cleanTransfers(pool: pg.Pool, ids: string[], tickets: string[]) {
   await pool.end();
 }
 
-test("East Village sends the return and SoHo acknowledges it after a Cents completion", async ({
-  page,
-  context,
-}) => {
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const ids: string[] = [];
-  const tickets = ["RETURN-" + randomUUID(), "RETURN-" + randomUUID()];
-  try {
-    await signIn(context, pool, ids, "+12125550193");
-    await pool.query(
-      "insert into cents_orders(store_id,order_number,status,source,created_at,updated_at) select 'soho',n,'IN_PROGRESS','webhook',now(),now() from unnest($1::text[]) n",
-      [tickets],
-    );
-    async function save(data: Record<string, unknown>) {
-      const response = await context.request.post("/api/batches", {
-        data: { operationId: randomUUID(), origin: "soho", ...data },
-      });
-      expect(response.ok()).toBeTruthy();
-      return (await response.json()).result;
+for (const [origin, destination] of [
+  ["soho", "east_village"],
+  ["east_village", "soho"],
+] as const) {
+  test(`${destination} sends the return and ${origin} acknowledges it after a Cents completion`, async ({
+    page,
+    context,
+  }) => {
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const ids: string[] = [];
+    const tickets = ["RETURN-" + randomUUID(), "RETURN-" + randomUUID()];
+    try {
+      await signIn(context, pool, ids, "+12125550193");
+      await pool.query(
+        "insert into cents_orders(store_id,order_number,status,source,created_at,updated_at) select $2,n,'IN_PROGRESS','webhook',now(),now() from unnest($1::text[]) n",
+        [tickets, origin],
+      );
+      async function save(data: Record<string, unknown>) {
+        const response = await context.request.post("/api/batches", {
+          data: { operationId: randomUUID(), origin, ...data },
+        });
+        expect(response.ok()).toBeTruthy();
+        return (await response.json()).result;
+      }
+      let batch = await save({ kind: "createBatch", add: tickets });
+      const orderKeys = tickets.map((orderNumber) => ({ storeId: origin, orderNumber }));
+      for (const action of ["send", "receive", "startProcessing", "markReady"]) {
+        batch = await save({
+          kind: "runAction",
+          action,
+          batchId: batch.batchId,
+          expectedVersion: batch.version,
+          store: action === "send" ? origin : destination,
+          ...(["startProcessing", "markReady"].includes(action) && { orderKeys }),
+        });
+      }
+      const detail = "/board?batch=" + batch.batchId + "&store=";
+      page.on("dialog", (d) => d.accept());
+      await page.goto(detail + destination);
+      await page.getByRole("button", { name: "Mark return sent" }).click();
+      await expect(page.getByText("Returning · 2 returning")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Acknowledge return" })).toHaveCount(0);
+      await pool.query("update cents_orders set status='COMPLETED' where order_number=$1", [tickets[0]]);
+      await page.goto(detail + origin);
+      await page.getByRole("button", { name: "Acknowledge return" }).click();
+      await expect(page.getByText("Recently returned · 2 of 2 returned")).toBeVisible();
+      for (const store of ["soho", "east_village"]) {
+        await page.goto("/board?store=" + store);
+        const returned = page
+          .getByRole("region", { name: "Recently returned" })
+          .getByRole("listitem")
+          .filter({ has: page.getByRole("link", { name: batch.batchId, exact: true }) });
+        await expect(returned.getByText("2 of 2 returned")).toBeVisible();
+      }
+    } finally {
+      await cleanTransfers(pool, ids, tickets);
     }
-    let batch = await save({ kind: "createBatch", add: tickets });
-    const orderKeys = tickets.map((orderNumber) => ({ storeId: "soho", orderNumber }));
-    for (const action of ["send", "receive", "startProcessing", "markReady"]) {
-      batch = await save({
-        kind: "runAction",
-        action,
-        batchId: batch.batchId,
-        expectedVersion: batch.version,
-        store: "east_village",
-        ...(["startProcessing", "markReady"].includes(action) && { orderKeys }),
-      });
-    }
-    const detail = "/board?batch=" + batch.batchId + "&store=";
-    page.on("dialog", (d) => d.accept());
-    await page.goto(detail + "east_village");
-    await page.getByRole("button", { name: "Mark return sent" }).click();
-    await expect(page.getByText("Returning · 2 returning")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Acknowledge return" })).toHaveCount(0);
-    await pool.query("update cents_orders set status='COMPLETED' where order_number=$1", [tickets[0]]);
-    await page.goto(detail + "soho");
-    await page.getByRole("button", { name: "Acknowledge return" }).click();
-    await expect(page.getByText("Recently returned · 2 of 2 returned")).toBeVisible();
-    for (const store of ["soho", "east_village"]) {
-      await page.goto("/board?store=" + store);
-      const returned = page
-        .getByRole("region", { name: "Recently returned" })
-        .getByRole("listitem")
-        .filter({ has: page.getByRole("link", { name: batch.batchId, exact: true }) });
-      await expect(returned.getByText("2 of 2 returned")).toBeVisible();
-    }
-  } finally {
-    await cleanTransfers(pool, ids, tickets);
-  }
-});
+  });
+}

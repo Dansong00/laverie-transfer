@@ -1,3 +1,4 @@
+import { findInvariantViolations } from "../scripts/check-invariants.mjs";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { POST as receiveCentsWebhook } from "../app/api/cents/webhook/route";
@@ -481,7 +482,10 @@ test("the two stores see the right sections, including retained orders after ass
     store: "soho",
   });
   expect(await saveBatch(token, acknowledge(7))).toMatchObject({ ok: false, status: 409 });
-  expect(await saveBatch(token, { ...sendReturn(7), store: "soho" })).toMatchObject({ ok: false, status: 403 });
+  expect(await saveBatch(token, { ...sendReturn(7), store: "soho" })).toMatchObject({
+    ok: false,
+    status: 403,
+  });
   expect(await getBatch(id)).toMatchObject({ version: 7, section: "ready_for_return" });
   expect(await sentBatchesAt("east_village")).toMatchObject([{ id }]);
   await saveBatch(token, sendReturn(7));
@@ -518,12 +522,54 @@ test("the two stores see the right sections, including retained orders after ass
   for (const store of ["soho", "east_village"] as const) expect(await listBatchesForStore(store)).toEqual([]);
   expect(await getBatch(id)).toMatchObject({ version: 9, total: 2, section: "recently_returned" });
   const history = await contentsHistory(id);
-  expect(history.custody.filter(h => h.action === "acknowledgeReturn").map(h => h.number)).toEqual(["1", "2"]);
+  expect(history.custody.filter((h) => h.action === "acknowledgeReturn").map((h) => h.number)).toEqual([
+    "1",
+    "2",
+  ]);
   expect(detail?.orders.map((row) => row.order.orderNumber)).toEqual(["1", "2"]);
   expect(detail?.history[0]).toMatchObject({
     staffName: "Taylor",
     handoff: { action: "send", operationId: departure.operationId },
   });
+});
+
+test("an East Village batch returns from SoHo and can only be acknowledged at East Village", async () => {
+  const origin = "east_village";
+  const destination = "soho";
+  const orderNumber = "EV-1";
+  const batchId = "EV-B001";
+  await pool.query(
+    "insert into cents_orders(store_id,order_number,status,source,created_at,updated_at) values ($1,$2,'IN_PROGRESS','webhook',now(),now())",
+    [origin, orderNumber],
+  );
+  expect(await saveBatch(token, { ...create([orderNumber]), origin })).toMatchObject({
+    ok: true,
+    result: { batchId },
+  });
+  const action = (name: string, expectedVersion: number, store: string, selection = {}) =>
+    saveBatch(token, {
+      kind: "runAction",
+      action: name,
+      operationId: randomUUID(),
+      origin,
+      store,
+      batchId,
+      expectedVersion,
+      ...selection,
+    });
+  const selected = { orderKeys: [{ storeId: origin, orderNumber }] };
+  expect(await action("send", 1, origin)).toMatchObject({ ok: true });
+  expect(await action("receive", 2, destination)).toMatchObject({ ok: true });
+  expect(await action("startProcessing", 3, destination, selected)).toMatchObject({ ok: true });
+  expect(await action("markReady", 4, destination, selected)).toMatchObject({ ok: true });
+  expect(await action("sendReturn", 5, destination)).toMatchObject({ ok: true });
+  expect(await action("acknowledgeReturn", 6, destination)).toMatchObject({ ok: false, status: 403 });
+  expect(await action("acknowledgeReturn", 6, origin)).toMatchObject({ ok: true, result: { version: 7 } });
+  expect(await getBatch(batchId)).toMatchObject({
+    section: "recently_returned",
+    orders: [{ membership: { phase: "returned", active: false, removedAt: null } }],
+  });
+  expect(await findInvariantViolations(pool)).toEqual([]);
 });
 
 test("empty plans stay at the origin, and a confirmed empty departure leaves the live board", async () => {

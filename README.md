@@ -70,7 +70,7 @@ Directory changes and their audit records commit together. The server rejects a 
 
 Open **Transfer board** from the staff profile. Planned batches appear at their origin. Arriving, Received, Processing, and Ready for return appear at the destination. Both stores see Returning and Recently returned. Open a batch to see its retained orders and handoff history. The board refreshes every 45 seconds while visible and when reopened or focused.
 
-For a SoHo batch, East Village staff choose **Mark return sent** once every retained order is ready and any changed contents have been confirmed. When the orders arrive, SoHo staff choose **Acknowledge return**. Completing an order in Cents leaves the batch awaiting acknowledgment. Both boards show the batch under **Recently returned** for seven days from acknowledgment. Its batch detail link continues to show the orders and handoff history afterward.
+Staff at the destination store choose **Mark return sent** once every retained order is ready and any changed contents have been confirmed. When the orders arrive back at the store that originated the batch, staff there choose **Acknowledge return**. This applies to batches originating at either SoHo or East Village. Completing an order in Cents leaves the batch awaiting acknowledgment. Both boards show the batch under **Recently returned** for seven days from acknowledgment. Its batch detail link continues to show the orders and handoff history afterward.
 
 **Board sections** saves the selected sections for the signed-in staff member across stores and devices. All seven sections start visible.
 

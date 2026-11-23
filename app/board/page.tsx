@@ -235,7 +235,7 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
       {atDestination && section === "ready_for_return" && !detail.contentsChanged && (
         <StoreButton label="Mark return sent" command={{ ...command, action: "sendReturn" }} />
       )}
-      {store === "soho" && store === origin && section === "returning" && (
+      {store === origin && section === "returning" && (
         <StoreButton label="Acknowledge return" command={{ ...command, action: "acknowledgeReturn" }} />
       )}
       {atDestination && waiting.length > 1 && (
