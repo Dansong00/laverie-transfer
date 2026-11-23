@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { isLocale } from "../i18n";
 import { getDb } from "../db/client";
 import { boardSections, operations, staffPreferences } from "../db/schema";
 import { BatchError } from "../transfer/commands";
@@ -42,5 +43,36 @@ export async function updateStaffPreferences(token: string | undefined, input: u
         createdAt: new Date(),
       });
     return sections;
+  });
+}
+
+export async function getStaffLocale(staffId: string, db: Pick<ReturnType<typeof getDb>, "select"> = getDb()) {
+  const [row] = await db.select({ locale: staffPreferences.locale })
+    .from(staffPreferences).where(eq(staffPreferences.staffId, staffId));
+  return row?.locale ?? "en";
+}
+
+export async function updateStaffLocale(token: string | undefined, value: unknown) {
+  return getDb().transaction(async tx => {
+    const actor = await getProfile(token, tx);
+    if (!actor) throw new BatchError(401, "Sign in required.");
+    if (!isLocale(value)) throw new BatchError(400, "Choose a supported language.");
+    const saved = await tx.insert(staffPreferences).values({ staffId: actor.staffId, locale: value })
+      .onConflictDoUpdate({
+        target: staffPreferences.staffId,
+        set: { locale: value },
+        setWhere: sql`${staffPreferences.locale} is distinct from excluded.locale`,
+      }).returning({ staffId: staffPreferences.staffId });
+    if (saved.length) {
+      await tx.insert(operations).values({
+        operationId: randomUUID(),
+        staffId: actor.staffId,
+        kind: "updateStaffLocale",
+        requestHash: createHash("sha256").update(JSON.stringify({ locale: value })).digest("hex"),
+        result: { locale: value },
+        createdAt: new Date(),
+      });
+    }
+    return value;
   });
 }

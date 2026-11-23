@@ -8,7 +8,7 @@ import { saveBatch, plannedBatches, plannedMembers } from "../transfer/planned";
 import { getBatch, listBatchesForStore } from "../transfer/board";
 import { contentsHistory, sentBatchesAt } from "../transfer/contents";
 import { boardSections } from "../db/schema";
-import { getStaffPreferences, updateStaffPreferences } from "../staff/preferences";
+import { getStaffLocale, getStaffPreferences, updateStaffLocale, updateStaffPreferences } from "../staff/preferences";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
 
 const pool = setupStaffTestDatabase();
@@ -828,4 +828,22 @@ test("each batch-wide reversal links all retained orders to the current trip", a
       )
     ).rows,
   ).toEqual(["1", "2"].map((order_number) => ({ order_number, operation_id: second.operationId })));
+});
+
+test("language and board settings coexist and repeated language saves record one change", async () => {
+  const other = await account("+12125550124");
+  expect(await getStaffLocale(staffId)).toBe("en");
+  await updateStaffPreferences(token, ["planned"]);
+  await updateStaffLocale(token, "es");
+  await updateStaffLocale(token, "es");
+  expect(await getStaffPreferences(staffId)).toEqual(["planned"]);
+  await updateStaffPreferences(token, []);
+  expect(await getStaffLocale(staffId)).toBe("es");
+  expect(await getStaffLocale(other.id)).toBe("en");
+  await expect(updateStaffLocale(undefined, "es")).rejects.toMatchObject({ status: 401 });
+  await expect(updateStaffLocale(token, "xx")).rejects.toMatchObject({ status: 400 });
+  await expect(pool.query("update staff_preferences set locale='xx' where staff_id=$1", [staffId]))
+    .rejects.toMatchObject({ code: "23514" });
+  const audit = await pool.query("select staff_id from operations where kind='updateStaffLocale'");
+  expect(audit.rows).toEqual([{ staff_id: staffId }]);
 });

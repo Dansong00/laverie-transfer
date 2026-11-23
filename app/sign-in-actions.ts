@@ -1,6 +1,10 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { localeCookie } from "../i18n";
+import { updateStaffLocale } from "../staff/preferences";
+import { BatchError } from "../transfer/commands";
 import { after } from "next/server";
 import { requestSignInCode, verifySignInCode } from "../staff/codes";
 import { revokeSession, sessionCookie } from "../staff/session";
@@ -22,9 +26,10 @@ export async function verifyCode(phone: string, code: string) {
   try {
     const result = await verifySignInCode(phone, code);
     if (!result) return "That code is invalid or expired. Check the code or request another.";
-    (await cookies()).set(sessionCookie, result.token, {
-      httpOnly: true, secure: true, sameSite: "lax", path: "/", expires: result.expiresAt,
-    });
+    const jar = await cookies();
+    const options = { httpOnly: true, secure: true, sameSite: "lax", path: "/", expires: result.expiresAt } as const;
+    jar.set(sessionCookie, result.token, options);
+    jar.set(localeCookie, result.locale, options);
     return null;
   } catch {
     return "Sign-in is unavailable. Try again shortly.";
@@ -35,4 +40,16 @@ export async function signOut() {
   const jar = await cookies();
   await revokeSession(jar.get(sessionCookie)?.value);
   jar.delete(sessionCookie);
+  jar.delete(localeCookie);
+}
+
+export async function saveLanguage(form: FormData) {
+  const jar = await cookies();
+  try {
+    const locale = await updateStaffLocale(jar.get(sessionCookie)?.value, form.get("locale"));
+    jar.set(localeCookie, locale, { httpOnly: true, secure: true, sameSite: "lax", path: "/" });
+  } catch (error) {
+    if (error instanceof BatchError && error.status === 401) redirect("/");
+    throw error;
+  }
 }

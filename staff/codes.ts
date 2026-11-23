@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { otpCodes, otpRequests, sessions, staff } from "../db/schema";
+import { getStaffLocale } from "./preferences";
 import { sessionToken } from "./session";
 import { normalizePhone, setting } from "./settings";
 import { matches, sign } from "./signature";
@@ -74,6 +75,6 @@ export async function verifySignInCode(input: unknown, code: unknown) {
     await tx.update(otpCodes).set({ consumedAt: now }).where(eq(otpCodes.id, otp.id));
     const [session] = await tx.insert(sessions)
       .values({ staffId: person.id, createdAt: now, lastUsedAt: now, expiresAt }).returning({ id: sessions.id });
-    return { token: sessionToken(session.id), expiresAt };
+    return { token: sessionToken(session.id), expiresAt, locale: await getStaffLocale(person.id, tx) };
   });
 }
