@@ -96,7 +96,8 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
                   <li key={card.id}>
                     <Link href={`/board?store=${store}&batch=${encodeURIComponent(card.id)}`}>{card.id}</Link>
                     <span>
-                      {card.total === 0 && section === "planned"
+                      {section === "recently_returned" ? `${card.phaseCounts.returned} of ${card.total} returned`
+                        : card.total === 0 && section === "planned"
                         ? "Planned (empty)"
                         : (section === "received" && card.ready > 0) ||
                             section === "processing" ||
@@ -156,7 +157,9 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
       <h2>{id}</h2>
       <p>
         {section ? sectionNames[section] : detail.batch.cancelledAt ? "Cancelled" : "No remaining orders"} ·{" "}
-        {detail.ready} of {detail.total} ready
+        {section === "recently_returned"
+          ? `${detail.phaseCounts.returned} of ${detail.total} returned`
+          : section === "returning" ? `${detail.total} returning` : `${detail.ready} of ${detail.total} ready`}
       </p>
       {detail.contentsChanged && <p>Contents changed, confirm before return</p>}
       {section === "planned" && store === detail.origin && (
@@ -228,6 +231,12 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
         </ul>
       ) : (
         <p>No remaining orders.</p>
+      )}
+      {atDestination && section === "ready_for_return" && !detail.contentsChanged && (
+        <StoreButton label="Mark return sent" command={{ ...command, action: "sendReturn" }} />
+      )}
+      {store === origin && section === "returning" && (
+        <StoreButton label="Acknowledge return" command={{ ...command, action: "acknowledgeReturn" }} />
       )}
       {atDestination && waiting.length > 1 && (
         <StoreButton

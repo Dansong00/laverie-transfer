@@ -88,25 +88,25 @@ const checks = [
     `,
   },
   {
-    name: "an order is returned without a SoHo acknowledgment",
+    name: "an order is returned without an origin-store acknowledgment",
     sql: `
       select bo.id::text
       from batch_orders bo
       join batches b on b.id = bo.batch_id
       where bo.phase = 'returned'
         and bo.removed_at is null
-        and (
-          b.origin <> 'soho'
-          or not exists (
-            select 1
-            from handoffs h
-            where h.batch_id = bo.batch_id
-              and h.store_id = bo.store_id
-              and h.order_number = bo.order_number
-              and h.to_phase = 'returned'
-              and h.staff_id is not null
-              and h.operation_id is not null
-          )
+        and not exists (
+          select 1
+          from handoffs h
+          where h.batch_id = bo.batch_id
+            and h.store_id = b.origin
+            and h.store_id = bo.store_id
+            and h.order_number = bo.order_number
+            and h.action = 'acknowledgeReturn'
+            and h.from_phase = 'return_sent'
+            and h.to_phase = 'returned'
+            and h.staff_id is not null
+            and h.operation_id is not null
         )
     `,
   },

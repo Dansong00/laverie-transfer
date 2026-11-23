@@ -70,7 +70,7 @@ test("a migrated database has no invariant violations", async () => {
   await expect(findInvariantViolations(pool)).resolves.toEqual([]);
 });
 
-test("a returned order without a SoHo acknowledgment is a violation", async () => {
+test("a returned order without an origin-store acknowledgment is a violation", async () => {
   await seedBatch();
   await insertMembership({
     orderNumber: "100",
@@ -79,7 +79,7 @@ test("a returned order without a SoHo acknowledgment is a violation", async () =
   });
 
   await expect(findInvariantViolations(pool)).resolves.toContain(
-    "an order is returned without a SoHo acknowledgment",
+    "an order is returned without an origin-store acknowledgment",
   );
 });
 

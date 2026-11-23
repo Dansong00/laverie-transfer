@@ -12,7 +12,11 @@ const transitions = {
 export function isStoreAction(change: BatchChange): change is StoreAction {
   return (
     change.kind === "runAction" &&
-    (change.action === "receive" || change.action === "startProcessing" || change.action === "markReady")
+    (change.action === "sendReturn" ||
+      change.action === "acknowledgeReturn" ||
+      change.action === "receive" ||
+      change.action === "startProcessing" ||
+      change.action === "markReady")
   );
 }
 
@@ -40,6 +44,8 @@ export async function advanceAtStore(
   staffId: string,
   at: Date,
 ) {
+  if (change.action === "sendReturn" || change.action === "acknowledgeReturn")
+    return advanceReturn(tx, batch, change, operationId, staffId, at);
   if (change.store !== batch.destination) throw new BatchError(403, "Select the receiving store.");
   const [fromPhase, toPhase] = transitions[change.action];
   const retained = and(eq(batchOrders.batchId, batch.id), isNull(batchOrders.removedAt));
@@ -76,19 +82,64 @@ export async function advanceAtStore(
         members.map((m) => m.id),
       ),
     );
-  await tx
-    .insert(handoffs)
-    .values(
-      members.map((m) => ({
-        operationId,
-        batchId: batch.id,
-        storeId: change.origin,
-        orderNumber: m.number,
-        action: change.action,
-        fromPhase,
-        toPhase,
-        staffId,
-        at,
-      })),
+  await tx.insert(handoffs).values(
+    members.map((m) => ({
+      operationId,
+      batchId: batch.id,
+      storeId: change.origin,
+      orderNumber: m.number,
+      action: change.action,
+      fromPhase,
+      toPhase,
+      staffId,
+      at,
+    })),
+  );
+}
+
+async function advanceReturn(
+  tx: Tx,
+  batch: typeof batches.$inferSelect,
+  change: Extract<StoreAction, { action: "sendReturn" | "acknowledgeReturn" }>,
+  operationId: string,
+  staffId: string,
+  at: Date,
+) {
+  const acknowledging = change.action === "acknowledgeReturn";
+  if (acknowledging && change.store !== batch.origin)
+    throw new BatchError(403, "Acknowledge the return at the origin store.");
+  if (!acknowledging && change.store !== batch.destination)
+    throw new BatchError(403, "Select the store sending the return.");
+  if (batch.contentsChanged) throw new BatchError(409, "Contents changed, confirm before return.");
+  const fromPhase = acknowledging ? "return_sent" : "ready_for_return";
+  const toPhase = acknowledging ? "returned" : "return_sent";
+  const retained = and(eq(batchOrders.batchId, batch.id), isNull(batchOrders.removedAt));
+  const members = await tx
+    .select({ number: batchOrders.orderNumber, active: batchOrders.active, phase: batchOrders.phase })
+    .from(batchOrders)
+    .where(retained)
+    .for("update");
+  if (!members.length || members.some((m) => !m.active || m.phase !== fromPhase))
+    throw new BatchError(
+      409,
+      acknowledging
+        ? "Send the whole batch back before acknowledging its return."
+        : "All remaining orders must be ready for return.",
     );
+  await tx.insert(handoffs).values(
+    members.map((m) => ({
+      operationId,
+      staffId,
+      batchId: batch.id,
+      storeId: change.origin,
+      orderNumber: m.number,
+      at,
+      action: change.action,
+      fromPhase,
+      toPhase,
+    })),
+  );
+  await tx.update(batchOrders).set({ phase: toPhase, active: !acknowledging }).where(retained);
+  if (acknowledging)
+    await tx.update(batches).set({ returnAcknowledgedAt: at }).where(eq(batches.id, batch.id));
 }

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, boardSections, centsOrders, handoffs, operations, staff } from "../db/schema";
@@ -67,6 +67,8 @@ function summarize(batch: Batch, phaseCounts: Counts, received: boolean) {
 }
 export type BoardCard = ReturnType<typeof summarize>;
 
+const recentlyReturnedDays = 7;
+
 export async function listBatchesForStore(store: StoreId) {
   const rows = await getDb()
     .select({
@@ -77,9 +79,18 @@ export async function listBatchesForStore(store: StoreId) {
     })
     .from(batches)
     .leftJoin(batchOrders, and(eq(batchOrders.batchId, batches.id), isNull(batchOrders.removedAt)))
-    .where(and(isNull(batches.cancelledAt), or(eq(batches.origin, store), eq(batches.destination, store))))
+    .where(
+      and(
+        isNull(batches.cancelledAt),
+        or(eq(batches.origin, store), eq(batches.destination, store)),
+        or(
+          isNull(batches.returnAcknowledgedAt),
+          sql`${batches.returnAcknowledgedAt} >= now() - ${recentlyReturnedDays} * interval '1 day'`,
+        ),
+      ),
+    )
     .groupBy(batches.id, batchOrders.phase)
-    .orderBy(desc(batches.createdAt), asc(batches.id));
+    .orderBy(desc(batches.returnAcknowledgedAt), desc(batches.createdAt), asc(batches.id));
   const counts = new Map<string, { batch: Batch; received: boolean; phases: Counts }>();
   for (const { batch, received, phase, members } of rows) {
     const item = counts.get(batch.id) ?? { batch, received, phases: {} };

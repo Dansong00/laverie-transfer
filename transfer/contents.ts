@@ -9,10 +9,7 @@ import { receiptRecorded, travelPhase } from "./processing";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 type Batch = typeof batches.$inferSelect;
-type ContentsChange = Extract<
-  BatchChange,
-  { kind: "correctSentMembership" | "confirmContents" } | { action: "sendReturn" }
->;
+type ContentsChange = Extract<BatchChange, { kind: "correctSentMembership" | "confirmContents" }>;
 export type Confirmation = { staffId: string; at: string; orderKeys: OrderKey[] };
 
 export async function sentBatchesAt(store: StoreId) {
@@ -29,6 +26,9 @@ export async function sentBatchesAt(store: StoreId) {
     .from(batches)
     .where(
       and(
+        sql`not exists (select 1 from ${batchOrders}
+          where ${batchOrders.batchId} = ${batches.id} and ${batchOrders.removedAt} is null
+            and ${batchOrders.phase} in ('return_sent', 'returned'))`,
         eq(batches.destination, store),
         isNull(batches.cancelledAt),
         sql`${travelPhase(batches.id)} <> 'planned'`,
@@ -133,19 +133,17 @@ export async function changeContents(
         .update(batchOrders)
         .set({ active: false, removedAt: at, removedByOp: operationId, removalNote: reason })
         .where(eq(batchOrders.id, member.id));
-      await tx
-        .insert(handoffs)
-        .values({
-          operationId,
-          batchId: batch.id,
-          ...orderKey,
-          action: "correctSentMembership",
-          fromPhase: member.phase,
-          toPhase: "did_not_travel",
-          staffId,
-          at,
-          corrects: departure.id,
-        });
+      await tx.insert(handoffs).values({
+        operationId,
+        batchId: batch.id,
+        ...orderKey,
+        action: "correctSentMembership",
+        fromPhase: member.phase,
+        toPhase: "did_not_travel",
+        staffId,
+        at,
+        corrects: departure.id,
+      });
     }
     await tx
       .update(batches)
@@ -160,44 +158,21 @@ export async function changeContents(
   }
   if (change.store !== batch.destination) throw new BatchError(403, "Select the store holding this batch.");
   const orderKeys = members.map((m) => ({ storeId: change.origin, orderNumber: m.orderNumber }));
-  if (change.kind === "confirmContents") {
-    const [receipt] = await tx
-      .select({ received: receiptRecorded(batch.id) })
-      .from(batches)
-      .where(eq(batches.id, batch.id));
-    if (!receipt.received || members.some((m) => m.phase === "sent"))
-      throw new BatchError(409, "Receive the batch before confirming its contents.");
-    if (!batch.contentsChanged) throw new BatchError(409, "There are no changed contents to confirm.");
-    await tx
-      .update(batches)
-      .set({
-        contentsChanged: false,
-        contentsConfirmedAt: at,
-        contentsConfirmedBy: staffId,
-        contentsConfirmedOrderKeys: orderKeys,
-      })
-      .where(eq(batches.id, batch.id));
-    return { staffId, at: at.toISOString(), orderKeys };
-  }
-  if (batch.contentsChanged) throw new BatchError(409, "Contents changed, confirm before return.");
-  if (!members.length || members.some((m) => m.phase !== "ready_for_return"))
-    throw new BatchError(409, "All remaining orders must be ready for return.");
+  const [receipt] = await tx
+    .select({ received: receiptRecorded(batch.id) })
+    .from(batches)
+    .where(eq(batches.id, batch.id));
+  if (!receipt.received || members.some((m) => m.phase === "sent"))
+    throw new BatchError(409, "Receive the batch before confirming its contents.");
+  if (!batch.contentsChanged) throw new BatchError(409, "There are no changed contents to confirm.");
   await tx
-    .insert(handoffs)
-    .values(
-      orderKeys.map((key) => ({
-        operationId,
-        batchId: batch.id,
-        ...key,
-        action: "sendReturn",
-        fromPhase: "ready_for_return",
-        toPhase: "return_sent",
-        staffId,
-        at,
-      })),
-    );
-  await tx
-    .update(batchOrders)
-    .set({ phase: "return_sent" })
-    .where(and(eq(batchOrders.batchId, batch.id), isNull(batchOrders.removedAt)));
+    .update(batches)
+    .set({
+      contentsChanged: false,
+      contentsConfirmedAt: at,
+      contentsConfirmedBy: staffId,
+      contentsConfirmedOrderKeys: orderKeys,
+    })
+    .where(eq(batches.id, batch.id));
+  return { staffId, at: at.toISOString(), orderKeys };
 }
