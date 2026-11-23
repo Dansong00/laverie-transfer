@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { getDb } from "../db/client";
+import { requestSignInCode, verifySignInCode } from "../staff/codes";
 import { listStaff, saveStaffChange } from "../staff/directory";
 import { getProfile, readSession, sessionToken } from "../staff/session";
 
@@ -171,4 +172,45 @@ test("admins changing each other's roles authorize against the committed directo
   expect(attempts.find((result) => result.status === "rejected")).toMatchObject({
     reason: { status: 403, code: "DIRECTORY_ADMIN_REQUIRED" },
   });
+});
+
+test("admins restore the same account, invalidate old credentials and replay a retry", async () => {
+  const admin = await account("admin", 0);
+  const member = await account("staff", 1);
+  const other = await account("staff", 2);
+  const enable = { kind: "enableStaff", targetStaffId: member.id, operationId: randomUUID() };
+  await saveStaffChange(admin.token, { ...enable, kind: "disableStaff", operationId: randomUUID() });
+  await expect(saveStaffChange(other.token, enable)).rejects.toMatchObject({ status: 403 });
+  // Accounts disabled before re-enabling was supported could still have an outstanding code.
+  await pool.query(`insert into otp_codes(id,phone,code_hash,created_at,expires_at)
+    values ($1,$2,'old',now(),now()+interval '5 minutes')`, [randomUUID(), numbers[1]]);
+  const result = await saveStaffChange(admin.token, enable);
+  expect(result).toMatchObject({ member: { id: member.id, active: true, role: "staff" }, replayed: false });
+  expect(await readSession(member.token)).toBeNull();
+  expect((await pool.query("select disabled_at,phone from staff where id=$1", [member.id])).rows)
+    .toEqual([{ disabled_at: null, phone: numbers[1] }]);
+  expect((await pool.query("select id from otp_codes where phone=$1 and consumed_at is null", [numbers[1]])).rows)
+    .toHaveLength(0);
+  vi.stubEnv("SMS_PROVIDER_API_KEY", "test");
+  vi.stubEnv("SMS_FROM", "+12125550170");
+  vi.stubEnv("APP_DOMAIN", "staff.example.test");
+  let code = "";
+  const sms = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    code = JSON.parse(String(options?.body)).text.slice(-6);
+    return new Response(null, { status: 202 });
+  });
+  try {
+    const request = await requestSignInCode(numbers[1]);
+    if (request.kind !== "accepted" || !request.deliver) throw new Error("Expected a fresh sign-in code");
+    await request.deliver();
+    const session = await verifySignInCode(numbers[1], code);
+    expect(await readSession(session?.token)).toMatchObject({ staffId: member.id, role: "staff" });
+  } finally {
+    sms.mockRestore();
+  }
+  await expect(saveStaffChange(admin.token, { ...enable, operationId: randomUUID() }))
+    .rejects.toMatchObject({ status: 409, code: "DIRECTORY_MEMBER_ALREADY_ACTIVE" });
+  await saveStaffChange(admin.token, { ...enable, kind: "disableStaff", operationId: randomUUID() });
+  expect(await saveStaffChange(admin.token, enable)).toEqual({ member: result.member, replayed: true });
+  expect((await listStaff(admin.token)).find(person => person.id === member.id)?.active).toBe(false);
 });

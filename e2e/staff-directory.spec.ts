@@ -56,6 +56,10 @@ test("admin can add staff, change a role, disable access and keep the last admin
     await expect(page.getByRole("status")).toHaveText(directoryErrors.DIRECTORY_LAST_ACTIVE_ADMIN.en);
     await page.reload();
     await expect(member).toContainText(en.staffDisabled);
+    await member.getByRole("button", { name: en.staffEnable, exact: true }).click();
+    await expect(member).toContainText(`${en.admin} · ${en.staffActive}`);
+    await page.reload();
+    await expect(member.getByRole("button", { name: en.staffDisable, exact: true })).toBeVisible();
   } finally {
     await pool.query("delete from operations where staff_id=$1", [admin]);
     await pool.query("delete from sessions where staff_id=$1", [admin]);
