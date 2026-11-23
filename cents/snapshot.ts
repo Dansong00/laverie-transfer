@@ -1,3 +1,5 @@
+import { mappedStatus } from "./order-fields";
+
 // Compare UTC timestamps at the same six-digit precision as Postgres timestamptz.
 export function sourceTimestamp(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -12,7 +14,7 @@ export function sourceTimestamp(value: unknown): string | null {
 type SnapshotVersion = { status: string; sourceUpdatedAt: string | null };
 type EventVersion = { status: string; sourceUpdatedAt: string };
 
-function terminal(status: string) {
+function terminal(status: string | undefined) {
   return status === "COMPLETED" || status === "CANCELLED";
 }
 
@@ -20,9 +22,11 @@ export function applyCentsEvent(current: SnapshotVersion | undefined, event: Eve
   if (!current) return "applied";
   const previous = current.sourceUpdatedAt;
   if (previous !== null && event.sourceUpdatedAt < previous) return "stale";
+  // Snapshots from before status normalization may still contain Cents display labels.
+  const wasTerminal = terminal(mappedStatus(current.status));
   if (previous === event.sourceUpdatedAt) {
-    return terminal(event.status) && !terminal(current.status) ? "applied" : "stale";
+    return terminal(event.status) && !wasTerminal ? "applied" : "stale";
   }
-  if (terminal(current.status) && !terminal(event.status)) return "needs_review";
+  if (wasTerminal && !terminal(event.status)) return "needs_review";
   return "applied";
 }

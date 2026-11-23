@@ -84,7 +84,8 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
   const store = storeHint === null ? undefined : stores.get(storeHint);
   const order = body.order;
   const orderNumber = orderCode(order.orderCode);
-  const status = typeof order.status === "string" ? (mappedStatus(order.status) ?? order.status.trim()) : "";
+  const rawStatus = typeof order.status === "string" ? order.status.trim() : "";
+  const status = mappedStatus(rawStatus);
   const time = sourceTimestamp(order.updatedAt);
   const date = typeof order.dueDate === "string" ? order.dueDate.trim() : "";
   const legacyDate = new Date(date);
@@ -101,7 +102,8 @@ export async function ingestCentsEvent(rawBody: string, authHeader: string | nul
     let reviewReason: string | null = null;
     if (!store) reviewReason = "unknown_store";
     else if (!time) reviewReason = order.updatedAt ? "invalid_updated_at" : "missing_updated_at";
-    else if (!orderNumber || !status) reviewReason = "missing_order_fields";
+    else if (!orderNumber || !rawStatus) reviewReason = "missing_order_fields";
+    else if (!status) reviewReason = "unknown_status";
 
     const [receipt] = await tx.insert(centsRawEvents).values({
       receivedAt, storeHint, fingerprint, body, duplicateOf: original?.id,
