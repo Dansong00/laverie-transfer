@@ -17,16 +17,18 @@ const lockPhone = (phone: string) => sql`select pg_advisory_xact_lock(hashtextex
 const activePhone = (phone: string) => and(eq(staff.phone, phone), eq(staff.active, true), isNull(staff.disabledAt));
 
 const phoneFailureLimit = 10;
-const failureWindowMs = 24 * 60 * 60 * 1000;
-const trafficLimits = { request: 300, verify: 600 } as const;
+const failureCutoff = sql`statement_timestamp() - interval '24 hours'`;
+const trafficLimits = { request: 20, verify: 60 } as const;
 type AuthTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
-// One row per action across all app instances. Commit this reservation before
+// One row per client and action across all app instances. Reserve it before
 // taking a phone lock so unrelated phones can finish their work concurrently.
-async function reserveTraffic(action: keyof typeof trafficLimits) {
+async function reserveTraffic(action: keyof typeof trafficLimits, clientIp: string) {
   const now = sql`statement_timestamp()`;
   const expired = sql`${otpTraffic.windowStart} <= ${now} - interval '1 minute'`;
-  const rows = await getDb().insert(otpTraffic).values({ action, windowStart: now, attempts: 1 })
+  const key = action + ":" + sign("otp-client:" + clientIp);
+  const db = getDb();
+  const rows = await db.insert(otpTraffic).values({ action: key, windowStart: now, attempts: 1 })
     .onConflictDoUpdate({
       target: otpTraffic.action,
       set: {
@@ -34,20 +36,23 @@ async function reserveTraffic(action: keyof typeof trafficLimits) {
         attempts: sql`case when ${expired} then 1 else ${otpTraffic.attempts} + 1 end`,
       },
       setWhere: sql`${expired} or ${otpTraffic.attempts} < ${trafficLimits[action]}`,
-    }).returning({ action: otpTraffic.action });
+    }).returning({ attempts: otpTraffic.attempts });
+  if (rows[0]?.attempts === 1) {
+    await db.delete(otpTraffic).where(lte(otpTraffic.windowStart, sql`${now} - interval '1 hour'`));
+  }
   return rows.length > 0;
 }
 
-async function recentFailures(tx: AuthTransaction, phone: string, now: Date) {
+async function recentFailures(tx: AuthTransaction, phone: string) {
   const [row] = await tx.select({ total: count() }).from(otpFailures)
-    .where(and(eq(otpFailures.phone, phone), gt(otpFailures.failedAt, new Date(+now - failureWindowMs))));
+    .where(and(eq(otpFailures.phone, phone), gt(otpFailures.failedAt, failureCutoff)));
   return row.total;
 }
 
-export async function requestSignInCode(input: unknown): Promise<CodeRequest> {
+export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1"): Promise<CodeRequest> {
   const phone = normalizePhone(input);
   if (!phone) return { kind: "invalid" };
-  if (!await reserveTraffic("request")) return { kind: "limited", retrySeconds: 60 };
+  if (!await reserveTraffic("request", clientIp)) return { kind: "limited", retrySeconds: 60 };
   return getDb().transaction(async tx => {
     await tx.execute(lockPhone(phone));
     const now = new Date();
@@ -64,7 +69,7 @@ export async function requestSignInCode(input: unknown): Promise<CodeRequest> {
     if (nextSend > +now) return { kind: "limited", retrySeconds: Math.ceil((nextSend - +now) / 1000) };
     await tx.insert(otpRequests).values({ phone, requestedAt: now });
     const [person] = await tx.select({ id: staff.id }).from(staff).where(activePhone(phone)).for("share");
-    if (!person || await recentFailures(tx, phone, now) >= phoneFailureLimit) return { kind: "accepted" };
+    if (!person || await recentFailures(tx, phone) >= phoneFailureLimit) return { kind: "accepted" };
 
     const id = randomUUID();
     const code = randomInt(1000000).toString().padStart(6, "0");
@@ -84,16 +89,16 @@ export async function requestSignInCode(input: unknown): Promise<CodeRequest> {
   });
 }
 
-export async function verifySignInCode(input: unknown, code: unknown) {
+export async function verifySignInCode(input: unknown, code: unknown, clientIp = "127.0.0.1") {
   const phone = normalizePhone(input);
   if (!phone || typeof code !== "string" || !/^\d{6}$/.test(code)) return null;
-  if (!await reserveTraffic("verify")) return null;
+  if (!await reserveTraffic("verify", clientIp)) return null;
   const result = await getDb().transaction(async tx => {
     await tx.execute(lockPhone(phone));
     const now = new Date();
     const [person] = await tx.select({ id: staff.id }).from(staff).where(activePhone(phone)).for("share");
     if (!person) return null;
-    const failures = await recentFailures(tx, phone, now);
+    const failures = await recentFailures(tx, phone);
     if (failures >= phoneFailureLimit) return null;
     const [otp] = await tx.select().from(otpCodes)
       .where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)))
@@ -102,9 +107,9 @@ export async function verifySignInCode(input: unknown, code: unknown) {
     if (!matches(otp.codeHash, sign(`otp:${otp.id}:${code}`))) {
       await tx.update(otpCodes).set({ failedAttempts: otp.failedAttempts + 1 }).where(eq(otpCodes.id, otp.id));
       await tx.delete(otpFailures).where(and(
-        eq(otpFailures.phone, phone), lte(otpFailures.failedAt, new Date(+now - failureWindowMs)),
+        eq(otpFailures.phone, phone), lte(otpFailures.failedAt, failureCutoff),
       ));
-      await tx.insert(otpFailures).values({ phone, failedAt: now });
+      await tx.insert(otpFailures).values({ phone, failedAt: sql`statement_timestamp()` });
       return failures + 1 === phoneFailureLimit ? "locked" as const : null;
     }
     const expiresAt = new Date(+now + Math.min(30, setting("SESSION_MAX_DAYS", 30)) * 86400000);

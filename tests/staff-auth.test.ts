@@ -135,15 +135,24 @@ test("the phone lock survives code replacement and expires with the rolling wind
   }
 });
 
-test("shared traffic budgets apply before phone-specific requests and verification", async () => {
-  await request();
-  await pool.query(`insert into otp_traffic(action,window_start,attempts) values
-    ('request',now(),300),('verify',now(),600)
-    on conflict(action) do update set window_start=excluded.window_start, attempts=excluded.attempts`);
-  expect((await requestSignInCode(unknown)).kind).toBe("limited");
-  expect((await pool.query("select id from otp_requests where phone=$1", [unknown])).rowCount).toBe(0);
-  expect(await verifySignInCode(phone, code)).toBeNull();
+test("an exhausted client budget leaves a second client free to request and verify", async () => {
+  const first = "192.0.2.10";
+  const second = "198.51.100.10";
+  // Create both budget rows through the service, then place them at the limit.
+  await requestSignInCode(unknown, first);
+  await verifySignInCode(unknown, "123456", first);
+  await pool.query("update otp_traffic set attempts=case when action like 'request:%' then 20 else 60 end");
+  expect((await requestSignInCode(phone, first)).kind).toBe("limited");
+  expect((await pool.query("select id from otp_requests where phone=$1", [phone])).rowCount).toBe(0);
+  const fresh = await requestSignInCode(phone, second);
+  if (fresh.kind !== "accepted" || !fresh.deliver) throw new Error("Expected a new code");
+  await fresh.deliver();
+  expect(await verifySignInCode(phone, code, first)).toBeNull();
+  expect(await verifySignInCode(phone, code, second)).toBeTruthy();
   await pool.query("update otp_traffic set window_start=now()-interval '61 seconds'");
-  expect((await requestSignInCode(unknown)).kind).toBe("accepted");
-  expect(await verifySignInCode(phone, code)).toBeTruthy();
+  const otherPhone = "+12125550173";
+  expect((await requestSignInCode(otherPhone, first)).kind).toBe("accepted");
+  const { rows } = await pool.query("select action from otp_traffic");
+  expect(JSON.stringify(rows)).not.toContain(first);
+  expect(JSON.stringify(rows)).not.toContain(second);
 });

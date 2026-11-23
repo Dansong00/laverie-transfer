@@ -125,7 +125,7 @@ export const otpTraffic = pgTable("otp_traffic", {
   action: text("action").primaryKey(),
   windowStart: timestamp("window_start", tz).notNull(),
   attempts: integer("attempts").notNull(),
-});
+}, table => [index("otp_traffic_window_start_idx").on(table.windowStart)]);
 
 export const otpRequests = pgTable(
   "otp_requests",
