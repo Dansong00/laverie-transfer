@@ -1,18 +1,19 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { localeCookie } from "../i18n";
 import { updateStaffLocale } from "../staff/preferences";
 import { BatchError } from "../transfer/commands";
 import { after } from "next/server";
+import { signInClientIp } from "../staff/client-ip";
 import { requestSignInCode, verifySignInCode } from "../staff/codes";
 import { revokeSession, sessionCookie } from "../staff/session";
 import { setting } from "../staff/settings";
 
 export async function requestCode(phone: string) {
   try {
-    const result = await requestSignInCode(phone);
+    const result = await requestSignInCode(phone, signInClientIp(await headers()));
     if (result.kind === "accepted" && result.deliver) after(result.deliver);
     if (result.kind === "invalid") return { error: "Enter a valid mobile number." } as const;
     const retrySeconds = result.kind === "limited" ? result.retrySeconds : Math.max(30, setting("OTP_RESEND_SECONDS", 30));
@@ -24,7 +25,7 @@ export async function requestCode(phone: string) {
 
 export async function verifyCode(phone: string, code: string) {
   try {
-    const result = await verifySignInCode(phone, code);
+    const result = await verifySignInCode(phone, code, signInClientIp(await headers()));
     if (!result) return "That code is invalid or expired. Check the code or request another.";
     const jar = await cookies();
     const options = { httpOnly: true, secure: true, sameSite: "lax", path: "/", expires: result.expiresAt } as const;

@@ -111,3 +111,48 @@ test("concurrent first-admin setup creates one admin and a disabled admin still 
   await pool.query("update staff set active=false where phone=$1", [unknown]);
   await expect(bootstrapFirstAdmin(pool)).rejects.toThrow(/admin already exists/i);
 });
+
+test("the phone lock survives code replacement and expires with the rolling window", async () => {
+  await request();
+  await pool.query("insert into otp_failures(phone,failed_at) select $1,now() from generate_series(1,9)", [phone]);
+  await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+  await request();
+  const currentCode = code;
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const wrong = currentCode === "000000" ? "111111" : "000000";
+    expect(await verifySignInCode(phone, wrong)).toBeNull();
+    expect(warn.mock.calls).toEqual([["staff_otp_phone_locked"]]);
+    expect(await verifySignInCode(phone, currentCode)).toBeNull();
+    await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+    expect(await requestSignInCode(phone)).toEqual(await requestSignInCode(unknown));
+    expect(sms).toHaveBeenCalledTimes(2);
+    expect((await pool.query("select count(*)::int as n from otp_codes")).rows[0].n).toBe(2);
+    await pool.query("update otp_failures set failed_at=now()-interval '24 hours 1 second'");
+    expect(await verifySignInCode(phone, currentCode)).toBeTruthy();
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("an exhausted client budget leaves a second client free to request and verify", async () => {
+  const first = "192.0.2.10";
+  const second = "198.51.100.10";
+  // Create both budget rows through the service, then place them at the limit.
+  await requestSignInCode(unknown, first);
+  await verifySignInCode(unknown, "123456", first);
+  await pool.query("update otp_traffic set attempts=case when action like 'request:%' then 20 else 60 end");
+  expect((await requestSignInCode(phone, first)).kind).toBe("limited");
+  expect((await pool.query("select id from otp_requests where phone=$1", [phone])).rowCount).toBe(0);
+  const fresh = await requestSignInCode(phone, second);
+  if (fresh.kind !== "accepted" || !fresh.deliver) throw new Error("Expected a new code");
+  await fresh.deliver();
+  expect(await verifySignInCode(phone, code, first)).toBeNull();
+  expect(await verifySignInCode(phone, code, second)).toBeTruthy();
+  await pool.query("update otp_traffic set window_start=now()-interval '61 seconds'");
+  const otherPhone = "+12125550173";
+  expect((await requestSignInCode(otherPhone, first)).kind).toBe("accepted");
+  const { rows } = await pool.query("select action from otp_traffic");
+  expect(JSON.stringify(rows)).not.toContain(first);
+  expect(JSON.stringify(rows)).not.toContain(second);
+});

@@ -25,7 +25,7 @@ export function setupStaffTestDatabase() {
     vi.spyOn(client, "getDb").mockReturnValue(db);
   });
   beforeEach(async () => {
-    await pool.query("truncate staff, otp_codes, otp_requests cascade");
+    await pool.query("truncate staff, otp_codes, otp_requests, otp_failures, otp_traffic cascade");
   });
   afterAll(async () => {
     vi.restoreAllMocks();

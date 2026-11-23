@@ -56,7 +56,9 @@ Set `SESSION_SECRET` to a random secret of at least 32 bytes. Set `APP_DOMAIN` t
 
 For first-time setup, set `BOOTSTRAP_ADMIN_PHONE` to the first admin’s E.164 number and run `pnpm staff:bootstrap` against the intended database. The command refuses if any admin already exists, including a disabled one.
 
-At `/`, enter a mobile number and the six-digit code sent by text. US numbers also accept local formatting. Texts go only to active staff. Codes expire after ten minutes. Staff can request another after 30 seconds, up to five sends per rolling hour. Five incorrect guesses lock that code. A new send replaces the previous code.
+At `/`, enter a mobile number and the six-digit code sent by text. US numbers also accept local formatting. Texts go only to active staff. Codes expire after ten minutes. Staff can request another after 30 seconds, up to five sends per rolling hour. Five incorrect guesses lock that code. A new send replaces the previous code. Ten incorrect guesses across codes for the same phone in a rolling 24 hours pause both code delivery and sign-in until fewer than ten failures remain in the window. A successful sign-in keeps earlier failures in that window. Requests during the pause show the usual response. A new lockout emits the redacted log event `staff_otp_phone_locked`.
+
+Each client IP can make 20 code requests and 60 verifications per minute across all app instances. These budgets apply before the phone-specific checks. On Vercel, the sign-in actions use the edge-provided client IP. The database stores a keyed hash of the address. Local development uses a loopback budget.
 
 `GET /api/session` returns the signed-in staff member’s ID, name, and current role, or HTTP 401. A secure HTTP-only cookie identifies a server-side session. Sessions expire after 30 days or seven idle days. Sign-out revokes the session. Use HTTPS for SMS autofill on supported mobile browsers.
 

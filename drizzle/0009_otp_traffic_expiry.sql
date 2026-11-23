@@ -1,0 +1,1 @@
+CREATE INDEX "otp_traffic_window_start_idx" ON "otp_traffic" USING btree ("window_start");
