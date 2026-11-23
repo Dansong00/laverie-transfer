@@ -115,6 +115,18 @@ export const otpCodes = pgTable("otp_codes", {
   failedAttempts: integer("failed_attempts").notNull().default(0),
 });
 
+export const otpFailures = pgTable("otp_failures", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  phone: text("phone").notNull(),
+  failedAt: timestamp("failed_at", tz).notNull(),
+}, table => [index("otp_failures_phone_time_idx").on(table.phone, table.failedAt)]);
+
+export const otpTraffic = pgTable("otp_traffic", {
+  action: text("action").primaryKey(),
+  windowStart: timestamp("window_start", tz).notNull(),
+  attempts: integer("attempts").notNull(),
+});
+
 export const otpRequests = pgTable(
   "otp_requests",
   {

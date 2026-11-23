@@ -57,6 +57,13 @@
       "when": 1795443785796,
       "tag": "0007_staff_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795468322502,
+      "tag": "0008_otp_lockout",
+      "breakpoints": true
     }
   ]
 }
