@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t, type Locale } from "../i18n";
 import type { StoreId } from "../db/eligible-orders";
 import type { BatchChange } from "../transfer/commands";
 
@@ -13,7 +14,7 @@ function canCheck(command: BatchChange) {
   );
 }
 
-export function useBatchChange(staffId: string, origin: StoreId) {
+export function useBatchChange(staffId: string, origin: StoreId, locale: Locale) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [uncertain, setUncertain] = useState(false);
@@ -29,7 +30,7 @@ export function useBatchChange(staffId: string, origin: StoreId) {
         const outstanding = Object.keys(localStorage).find((item) => item.startsWith(prefix));
         if (change && outstanding) {
           setUncertain(true);
-          setMessage("Check the pending change before starting another.");
+          setMessage(t(locale, "checkBeforeAnother"));
           return;
         }
         const key = outstanding ?? prefix + crypto.randomUUID();
@@ -61,13 +62,13 @@ export function useBatchChange(staffId: string, origin: StoreId) {
         } catch (error) {
           if (!autoCheck || checkOnly) throw error;
           setUncertain(true);
-          setMessage("Not confirmed yet, checking…");
+          setMessage(t(locale, "checkingChange"));
           checkOnly = true;
           response = await request(true);
         }
         if (response.status === 202) {
           setUncertain(true);
-          setMessage("Still unconfirmed. Retry to check and finish this change.");
+          setMessage(t(locale, "retryToFinish"));
           return;
         }
         if (response.status === 401) {
@@ -93,7 +94,7 @@ export function useBatchChange(staffId: string, origin: StoreId) {
         window.location.replace((result.result.board ? "/board?" : "/orders?") + params);
       } catch {
         setUncertain(true);
-        setMessage("Not confirmed yet. Retry to check this change.");
+        setMessage(t(locale, "retryToCheck"));
       } finally {
         if (!navigating) {
           pending.current = false;
@@ -101,7 +102,7 @@ export function useBatchChange(staffId: string, origin: StoreId) {
         }
       }
     },
-    [origin, prefix],
+    [locale, origin, prefix],
   );
 
   useEffect(() => {
@@ -112,14 +113,14 @@ export function useBatchChange(staffId: string, origin: StoreId) {
       const body = localStorage.getItem(key);
       const command = body && JSON.parse(body);
       if (command && canCheck(command)) {
-        setMessage("Not confirmed yet, checking…");
+        setMessage(t(locale, "checkingChange"));
         void submit(undefined, true);
       } else {
-        setMessage("A previous batch change is unconfirmed. Checking it can finish the save.");
+        setMessage(t(locale, "previousUnconfirmed"));
       }
     }, 0);
     return () => window.clearTimeout(recovery);
-  }, [prefix, submit]);
+  }, [locale, prefix, submit]);
 
   return { busy, message, setMessage, uncertain, submit };
 }

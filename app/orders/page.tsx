@@ -5,25 +5,22 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { listEligibleOrders, stores } from "../../db/eligible-orders";
-import { requestProfile } from "../../staff/request-profile";
+import { formatLocalDate } from "../../i18n/dates";
+import { t, type Locale } from "../../i18n";
+import { requestLocale, requestProfile } from "../../staff/request-profile";
 import "../sign-in.css";
 import "./orders.css";
 
-const formatDue = new Intl.DateTimeFormat("en-US", {
-  timeZone: "America/New_York",
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-export default function Orders(props: PageProps<"/orders">) {
+export default async function Orders(props: PageProps<"/orders">) {
+  const locale = await requestLocale();
   return (
-    <Suspense fallback={<p>Loading eligible orders…</p>}>
-      <EligibleOrders {...props} />
+    <Suspense fallback={<p>{t(locale, "ordersLoading")}</p>}>
+      <EligibleOrders {...props} locale={locale} />
     </Suspense>
   );
 }
 
-async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
+async function EligibleOrders({ searchParams, locale }: PageProps<"/orders"> & { locale: Locale }) {
   const actor = await requestProfile();
   if (!actor) redirect("/");
   const query = await searchParams;
@@ -44,21 +41,24 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
 
   return (
     <main className="eligible-orders">
-      <Link href="/">Staff home</Link>
+      <Link href="/">{t(locale, "staffHome")}</Link>
       {" · "}
-      <Link href={"/board?store=" + store}>Transfer board</Link>
-      <h1>Eligible orders</h1>
-      <nav aria-label="Store">
+      <Link href={"/board?store=" + store}>{t(locale, "board")}</Link>
+      <h1>{t(locale, "orders")}</h1>
+      <nav aria-label={t(locale, "store")}>
         {Object.entries(stores).map(([id, name]) => (
           <Link key={id} href={`/orders?store=${id}`} aria-current={id === store ? "page" : undefined}>
             {name}
           </Link>
         ))}
       </nav>
-      {typeof query.sent === "string" && <p role="status">Marked {query.sent} sent.</p>}
-      {query.saved === "again" && <p role="status">Already saved.</p>}
+      {typeof query.sent === "string" && (
+        <p role="status">{t(locale, "ordersSentStatus", { batch: query.sent })}</p>
+      )}
+      {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
       <Planner
         key={JSON.stringify([store, plan?.id, plan?.version, trip?.id, trip?.version])}
+        locale={locale}
         trip={
           trip && history
             ? { ...trip, origin: trip.origin === "soho" ? "soho" : "east_village", ...history }
@@ -70,9 +70,9 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
         plan={plan}
         members={members.map((member) => member.orderNumber)}
       >
-        <h2>Eligible at {stores[store]}</h2>
+        <h2>{t(locale, "ordersEligibleAt", { store: stores[store] })}</h2>
         {orders.length === 0 ? (
-          <p>No eligible orders at {stores[store]}.</p>
+          <p>{t(locale, "ordersNoneEligible", { store: stores[store] })}</p>
         ) : (
           <ul>
             {orders.map((order) => (
@@ -88,12 +88,16 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
                 </span>
                 <small>
                   {order.dueAt ? (
-                    <time dateTime={order.dueAt.toISOString()}>Due {formatDue.format(order.dueAt)}</time>
+                    <time dateTime={order.dueAt.toISOString()}>
+                      {t(locale, "ordersDue", {
+                        date: formatLocalDate(locale, order.dueAt),
+                      })}
+                    </time>
                   ) : (
-                    "No due date"
+                    t(locale, "ordersNoDueDate")
                   )}
                 </small>
-                {order.isPersonalDetergent && <small>Personal detergent</small>}
+                {order.isPersonalDetergent && <small>{t(locale, "personalDetergent")}</small>}
               </li>
             ))}
           </ul>
@@ -101,21 +105,21 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
       </Planner>
       {listedTrips.length > 0 && (
         <section>
-          <h2>Sent to {stores[store]}</h2>
+          <h2>{t(locale, "ordersSentTo", { store: stores[store] })}</h2>
           <ul>
-            {listedTrips.map((t) => (
-              <li key={t.id}>
-                <Link href={`/orders?store=${store}&contents=${t.id}`}>{t.id}</Link>
-                {t.changed && " · Contents changed, confirm before return"}
+            {listedTrips.map((trip) => (
+              <li key={trip.id}>
+                <Link href={`/orders?store=${store}&contents=${trip.id}`}>{trip.id}</Link>
+                {trip.changed && <> · {t(locale, "contentsChanged")}</>}
               </li>
             ))}
           </ul>
         </section>
       )}
-      {trip && <Link href={`/orders?store=${store}`}>Back to eligible orders</Link>}
+      {trip && <Link href={`/orders?store=${store}`}>{t(locale, "ordersBackToEligible")}</Link>}
       {plans.length > 0 && (
         <section>
-          <h2>Planned batches</h2>
+          <h2>{t(locale, "ordersPlannedBatches")}</h2>
           <ul>
             {plans.map((batch) => (
               <li key={batch.id}>
@@ -125,7 +129,7 @@ async function EligibleOrders({ searchParams }: PageProps<"/orders">) {
           </ul>
         </section>
       )}
-      {plan && <Link href={`/orders?store=${store}`}>Plan another batch</Link>}
+      {plan && <Link href={`/orders?store=${store}`}>{t(locale, "ordersPlanAnother")}</Link>}
     </main>
   );
 }

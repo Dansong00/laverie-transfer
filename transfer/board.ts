@@ -7,15 +7,6 @@ import { correctionReason, listEmptyCorrections } from "./corrections";
 import { receiptRecorded, travelPhase } from "./processing";
 
 export type Section = (typeof boardSections)[number];
-export const sectionNames: Record<Section, string> = {
-  planned: "Planned",
-  arriving: "Arriving",
-  received: "Received",
-  processing: "Processing",
-  ready_for_return: "Ready for return",
-  returning: "Returning",
-  recently_returned: "Recently returned",
-};
 
 type Batch = typeof batches.$inferSelect;
 type Counts = Record<string, number>;

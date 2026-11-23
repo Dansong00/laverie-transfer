@@ -1,14 +1,14 @@
 import { en } from "./en";
 import { es } from "./es";
+import type { Locale } from "./locales";
 
-export const locales = ["en", "es"] as const;
-export type Locale = typeof locales[number];
-export const localeCookie = "laverie_locale";
+export { isLocale, locales, localeCookie, type Locale } from "./locales";
+export type MessageKey = keyof typeof en;
 
-export function isLocale(value: unknown): value is Locale {
-  return value === "en" || value === "es";
-}
-
-export function t(locale: Locale, key: keyof typeof en) {
-  return (locale === "es" ? es : en)[key];
+export function t(locale: Locale, key: MessageKey, values?: Readonly<Record<string, string | number>>) {
+  const message = (locale === "es" ? es : en)[key];
+  if (!values) return message;
+  return message.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
+    Object.hasOwn(values, name) ? String(values[name]) : placeholder,
+  );
 }

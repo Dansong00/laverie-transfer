@@ -2,9 +2,14 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { t, type Locale } from "../../i18n";
 import type { DirectoryMember, StaffChange } from "../../staff/directory";
 
-export function Directory({ actorId, members }: { actorId: string; members: DirectoryMember[] }) {
+export function Directory({ actorId, members, locale }: {
+  actorId: string;
+  members: DirectoryMember[];
+  locale: Locale;
+}) {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -45,12 +50,12 @@ export function Directory({ actorId, members }: { actorId: string; members: Dire
         setMessage(result.error);
         return;
       }
-      setMessage(result.replayed ? "Already saved." : "Saved.");
+      setMessage(t(locale, result.replayed ? "alreadySaved" : "saved"));
       if (change.kind === "addStaff") addForm.current?.reset();
       if (change.kind !== "addStaff" && change.targetStaffId === actorId) window.location.replace("/");
       else router.refresh();
     } catch {
-      setMessage("Not confirmed yet. Retry the same change to check.");
+      setMessage(t(locale, "staffRetryChange"));
     } finally {
       saving.current = false;
       setBusy(false);
@@ -63,7 +68,7 @@ export function Directory({ actorId, members }: { actorId: string; members: Dire
         {message}
       </p>
       <details className="add-staff">
-        <summary>Add staff</summary>
+        <summary>{t(locale, "staffAdd")}</summary>
         <form
           ref={addForm}
           onSubmit={(event) => {
@@ -77,17 +82,17 @@ export function Directory({ actorId, members }: { actorId: string; members: Dire
             });
           }}
         >
-          <label htmlFor="name">Name</label>
+          <label htmlFor="name">{t(locale, "name")}</label>
           <input id="name" name="name" required maxLength={120} />
-          <label htmlFor="phone">Mobile number</label>
+          <label htmlFor="phone">{t(locale, "mobileNumber")}</label>
           <input id="phone" name="phone" type="tel" required maxLength={40} />
-          <label htmlFor="role">Role</label>
+          <label htmlFor="role">{t(locale, "role")}</label>
           <select id="role" name="role">
-            <option value="staff">Staff</option>
-            <option value="admin">Admin</option>
+            <option value="staff">{t(locale, "staff")}</option>
+            <option value="admin">{t(locale, "admin")}</option>
           </select>
           <button className="primary" disabled={busy}>
-            Add staff member
+            {t(locale, "staffAddMember")}
           </button>
         </form>
       </details>
@@ -97,7 +102,7 @@ export function Directory({ actorId, members }: { actorId: string; members: Dire
             <h2>{person.name}</h2>
             <p>{person.phone}</p>
             <p>
-              {person.role === "admin" ? "Admin" : "Staff"} · {person.active ? "Active" : "Disabled"}
+              {t(locale, person.role === "admin" ? "admin" : "staff")} · {t(locale, person.active ? "staffActive" : "staffDisabled")}
             </p>
             {person.active && (
               <div className="controls">
@@ -105,22 +110,25 @@ export function Directory({ actorId, members }: { actorId: string; members: Dire
                   disabled={busy}
                   onClick={() => {
                     const role = person.role === "staff" ? "admin" : "staff";
-                    if (window.confirm(`Change ${person.name}’s role to ${role}?`)) {
+                    const prompt = t(locale, role === "admin" ? "staffConfirmMakeAdmin" : "staffConfirmMakeStaff", {
+                      name: person.name,
+                    });
+                    if (window.confirm(prompt)) {
                       void save({ kind: "updateStaffRole", targetStaffId: person.id, role });
                     }
                   }}
                 >
-                  {person.role === "staff" ? "Make admin" : "Make staff"}
+                  {t(locale, person.role === "staff" ? "staffMakeAdmin" : "staffMakeStaff")}
                 </button>
                 <button
                   disabled={busy}
                   onClick={() => {
-                    if (window.confirm(`Disable ${person.name} and sign them out of all devices?`)) {
+                    if (window.confirm(t(locale, "staffConfirmDisable", { name: person.name }))) {
                       void save({ kind: "disableStaff", targetStaffId: person.id });
                     }
                   }}
                 >
-                  Disable
+                  {t(locale, "staffDisable")}
                 </button>
               </div>
             )}
