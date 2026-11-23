@@ -21,7 +21,16 @@ type Result = {
   confirmation?: Confirmation;
   correction?: CorrectionRecord;
 };
-type Outcome = { ok: true; result: Result } | { ok: false; status: number; error: string };
+type Outcome =
+  | { ok: true; result: Result }
+  | {
+      ok: false;
+      status: number;
+      error: BatchError["code"] | "BATCH_LEGACY_ERROR";
+      message: string;
+      values?: BatchError["values"];
+    };
+type LegacyFailure = { ok: false; status: number; error: string };
 
 const retained = (batchId: string) => and(eq(batchOrders.batchId, batchId), isNull(batchOrders.removedAt));
 
@@ -77,7 +86,7 @@ async function addOrders(tx: Tx, id: string, origin: StoreId, numbers: string[],
     .where(and(eligibleAt(origin, tx), requested));
   const available = new Set(rows.map((row) => row.number));
   const missing = numbers.filter((number) => !available.has(number));
-  if (missing.length) throw new BatchError(409, "Orders no longer eligible: " + missing.join(", "));
+  if (missing.length) throw new BatchError(409, "BATCH_ORDERS_INELIGIBLE", { orders: missing.join(", ") });
   await tx.insert(batchOrders).values(
     numbers.map((orderNumber) => ({
       batchId: id,
@@ -131,7 +140,7 @@ async function updateBatch(tx: Tx, change: Extract<BatchChange, { kind: "updateB
       })
       .where(and(retained(change.batchId), eq(batchOrders.orderNumber, orderNumber)))
       .returning({ id: batchOrders.id });
-    if (!removed.length) throw new BatchError(409, "Order is no longer in this batch: " + orderNumber);
+    if (!removed.length) throw new BatchError(409, "BATCH_ORDER_NOT_IN_BATCH", { orderNumber });
   }
   await addOrders(tx, change.batchId, change.origin, change.add, op);
 }
@@ -166,10 +175,12 @@ async function runAction(
     .where(retained(change.batchId))
     .orderBy(asc(batchOrders.orderNumber))
     .for("update");
-  if (!members.length) throw new BatchError(409, "Add an order before marking this batch sent.");
+  if (!members.length) throw new BatchError(409, "BATCH_EMPTY_SEND");
   const invalid = members.filter((m) => !m.active || m.phase !== "planned" || !m.open);
   if (invalid.length)
-    throw new BatchError(409, "Orders cannot be sent: " + invalid.map((m) => m.orderNumber).join(", "));
+    throw new BatchError(409, "BATCH_ORDERS_CANNOT_SEND", {
+      orders: invalid.map((m) => m.orderNumber).join(", "),
+    });
   await tx.insert(handoffs).values(
     members.map(({ orderNumber }) => ({
       operationId,
@@ -197,9 +208,9 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
     .from(batches)
     .where(and(eq(batches.id, change.batchId), eq(batches.origin, change.origin)))
     .for("update");
-  if (!batch) throw new BatchError(404, "Batch not found.");
-  if (batch.version !== change.expectedVersion) throw new BatchError(409, "This batch changed, refresh.");
-  if (batch.cancelledAt) throw new BatchError(409, "This batch was cancelled.");
+  if (!batch) throw new BatchError(404, "BATCH_NOT_FOUND");
+  if (batch.version !== change.expectedVersion) throw new BatchError(409, "BATCH_VERSION_CONFLICT");
+  if (batch.cancelledAt) throw new BatchError(409, "BATCH_CANCELLED");
   const cancelled = change.kind === "deleteBatch";
   const now = new Date();
   let correction: CorrectionRecord | undefined;
@@ -220,7 +231,7 @@ async function apply(tx: Tx, change: BatchChange, op: string, staffId: string): 
       .where(and(retained(batch.id), ne(batchOrders.phase, "planned")))
       .limit(1);
     if (travelling.length || batch.contentsChanged || batch.contentsConfirmedAt)
-      throw new BatchError(409, "Only unsent batches can be changed.");
+      throw new BatchError(409, "BATCH_UNSENT_REQUIRED");
     if (cancelled) await deleteBatch(tx, batch.id, op, now);
     else await updateBatch(tx, change, op);
   } else {
@@ -251,21 +262,25 @@ export function saveBatch(
   checkOnly: boolean,
 ): Promise<Saved | null>;
 export async function saveBatch(token: string | undefined, input: unknown, checkOnly = false) {
-  if (!hasValidSessionToken(token)) throw new BatchError(401, "Sign in required.");
+  if (!hasValidSessionToken(token)) throw new BatchError(401, "BATCH_SIGN_IN_REQUIRED");
   return getDb().transaction(async (tx) => {
     const actor = await getProfile(token, tx);
-    if (!actor) throw new BatchError(401, "Sign in required.");
+    if (!actor) throw new BatchError(401, "BATCH_SIGN_IN_REQUIRED");
     const { operationId, change } = parseBatchCommand(input);
     const kind = change.kind === "runAction" ? change.action : change.kind;
     const requestHash = createHash("sha256").update(JSON.stringify(change)).digest("hex");
 
     const staffId = actor.staffId;
-    async function replay() {
+    async function replay(): Promise<Saved | null> {
       const [previous] = await tx.select().from(operations).where(eq(operations.operationId, operationId));
       if (!previous) return null;
       if (previous.staffId !== staffId || previous.kind !== kind || previous.requestHash !== requestHash)
-        throw new BatchError(409, "This operation ID is already in use.");
-      return { ...(previous.result as Outcome), replayed: true };
+        throw new BatchError(409, "BATCH_OPERATION_CONFLICT");
+      const outcome = previous.result as Outcome | LegacyFailure;
+      if (!outcome.ok && !("message" in outcome)) {
+        return { ...outcome, error: "BATCH_LEGACY_ERROR", message: outcome.error, replayed: true };
+      }
+      return { ...outcome, replayed: true };
     }
     const previous = await replay();
     if (previous || checkOnly) return previous;
@@ -290,13 +305,13 @@ export async function saveBatch(token: string | undefined, input: unknown, check
         (change.kind === "correctSentMembership" || change.kind === "correctTravelPhase") &&
         actor.role !== "admin"
       )
-        throw new BatchError(403, "Admin access required.");
-      if (!allowed) throw new BatchError(403, "Staff access required.");
+        throw new BatchError(403, "BATCH_ADMIN_REQUIRED");
+      if (!allowed) throw new BatchError(403, "BATCH_STAFF_REQUIRED");
       const result = await tx.transaction((inner) => apply(inner, change, operationId, actor.staffId));
       outcome = { ok: true, result };
     } catch (error) {
       if (!(error instanceof BatchError)) throw error;
-      outcome = { ok: false, status: error.status, error: error.message };
+      outcome = { ok: false, status: error.status, ...error.payload() };
     }
     await tx
       .update(operations)

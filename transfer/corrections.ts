@@ -19,7 +19,7 @@ export async function reversePhase(
   at: Date,
 ): Promise<CorrectionRecord> {
   const single = change.kind === "stepBackOrder";
-  if (single && change.store !== batch.destination) throw new BatchError(403, "Select the receiving store.");
+  if (single && change.store !== batch.destination) throw new BatchError(403, "BATCH_RECEIVING_STORE_REQUIRED");
   const members = await tx
     .select()
     .from(batchOrders)
@@ -34,7 +34,7 @@ export async function reversePhase(
 
   let fromPhase = members[0]?.phase;
   if (!members.length) {
-    if (single) throw new BatchError(409, "This order is no longer in the batch.");
+    if (single) throw new BatchError(409, "BATCH_SELECTED_ORDER_REMOVED");
     const [row] = await tx
       .select({ phase: travelPhase(batch.id) })
       .from(batches)
@@ -42,7 +42,7 @@ export async function reversePhase(
     fromPhase = row.phase;
   }
   if (members.some((m) => !m.active || m.phase !== fromPhase))
-    throw new BatchError(409, "All remaining orders must be active and in the same travel phase.");
+    throw new BatchError(409, "BATCH_MIXED_TRAVEL_PHASES");
 
   let toPhase: string;
   if (single && fromPhase === "ready_for_return") toPhase = "processing";
@@ -53,8 +53,8 @@ export async function reversePhase(
     throw new BatchError(
       409,
       single
-        ? "Only processing or ready orders can step back."
-        : "Only sent or received batches can step back.",
+        ? "BATCH_ORDER_STEP_BACK_UNAVAILABLE"
+        : "BATCH_TRAVEL_STEP_BACK_UNAVAILABLE",
     );
 
   if (members.length) {
@@ -76,7 +76,7 @@ export async function reversePhase(
       )
       .orderBy(asc(handoffs.orderNumber), desc(sql`(${operations.result} #>> '{result,version}')::integer`));
     if (originals.length !== members.length)
-      throw new BatchError(409, "The original handoff could not be found.");
+      throw new BatchError(409, "BATCH_HANDOFF_NOT_FOUND");
     await tx.insert(handoffs).values(
       originals.map((original) => ({
         batchId: batch.id,

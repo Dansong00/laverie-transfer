@@ -1,6 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
+import { en } from "../i18n/en";
 
 test("staff can sign in from a text, refresh and sign out", async ({ page, context }) => {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -21,16 +22,16 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect.poll(() => readFile(inbox, "utf8").catch(() => "")).toMatch(/^\d{6}$/);
     await otp.fill(await readFile(inbox, "utf8"));
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: en.profile })).toBeVisible();
     const cookie = (await context.cookies()).find(c => c.name === "laverie_session");
     expect(cookie).toMatchObject({ secure: true, httpOnly: true, sameSite: "Lax" });
     await page.reload();
     await expect(page.getByText("Taylor")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Staff admin" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: en.directory })).toHaveCount(0);
     await expect(page.getByText(phone)).toHaveCount(0);
     expect((await page.request.get("/api/staff")).status()).toBe(403);
     await page.goto("/staff");
-    await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: en.profile })).toBeVisible();
     const response = await page.request.get("/api/session?role=admin&staffId=forged");
     expect(await response.json()).toEqual({ name: "Taylor", role: "staff", staffId: person.id });
     await pool.query(
@@ -38,7 +39,7 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
        values ('soho','E2E-S7-SO','IN_PROGRESS','webhook',now(),now()),
               ('east_village','E2E-S7-EV','IN_PROGRESS','webhook',now(),now())`,
     );
-    await page.getByRole("link", { name: "Eligible orders" }).click();
+    await page.getByRole("link", { name: en.orders }).click();
     await expect(page.getByRole("link", { name: "SoHo", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-SO")).toBeVisible();
     await expect(page.getByText("#E2E-S7-EV")).toHaveCount(0);
@@ -48,8 +49,8 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect(page.getByRole("link", { name: "East Village" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-EV")).toBeVisible();
     await expect(page.getByText("#E2E-S7-SO")).toHaveCount(0);
-    await page.getByRole("link", { name: "Staff home" }).click();
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await page.getByRole("link", { name: en.staffHome }).click();
+    await page.getByRole("button", { name: en.signOut }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     expect((await page.request.get("/api/session")).status()).toBe(401);
   } finally {

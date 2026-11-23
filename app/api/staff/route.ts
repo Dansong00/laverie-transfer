@@ -7,10 +7,9 @@ async function respond(run: () => Promise<unknown>) {
   try {
     return Response.json(await run(), { headers });
   } catch (error) {
-    if (error instanceof DirectoryError)
-      return Response.json({ error: error.message }, { status: error.status, headers });
-    console.error("Staff directory request failed");
-    return Response.json({ error: "The directory is unavailable." }, { status: 503, headers });
+    const failure = error instanceof DirectoryError ? error : new DirectoryError(503, "DIRECTORY_UNAVAILABLE");
+    if (failure !== error) console.error("Staff directory request failed");
+    return Response.json({ error: failure.code, message: failure.message }, { status: failure.status, headers });
   }
 }
 
@@ -22,15 +21,15 @@ export function POST(request: NextRequest) {
   return respond(async () => {
     // Only accept JSON. A cross-origin browser form cannot submit this content type.
     if (request.headers.get("sec-fetch-site") === "cross-site")
-      throw new DirectoryError(403, "Same-origin request required.");
+      throw new DirectoryError(403, "DIRECTORY_SAME_ORIGIN_REQUIRED");
     if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") {
-      throw new DirectoryError(415, "Send a JSON staff change.");
+      throw new DirectoryError(415, "DIRECTORY_JSON_REQUIRED");
     }
     let input: unknown;
     try {
       input = await request.json();
     } catch {
-      throw new DirectoryError(400, "Invalid JSON.");
+      throw new DirectoryError(400, "DIRECTORY_INVALID_JSON");
     }
     return saveStaffChange(request.cookies.get(sessionCookie)?.value, input);
   });

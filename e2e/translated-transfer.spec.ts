@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import pg from "pg";
+import { batchErrors } from "../i18n/batch-errors";
+import { directoryErrors } from "../i18n/directory-errors";
 import { t } from "../i18n";
 import { cleanTransfers, signIn } from "./transfer-fixtures";
 
@@ -25,7 +27,19 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await expect(page.getByRole("heading", { name: t("es", "directory"), exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Sam", exact: true })).toBeVisible();
     await page.getByText(t("es", "staffAdd"), { exact: true }).click();
-    await expect(page.getByLabel(t("es", "mobileNumber"))).toBeVisible();
+    await page.getByLabel(t("es", "name"), { exact: true }).fill("Duplicate phone");
+    await page.getByLabel(t("es", "mobileNumber")).fill("+12125550197");
+    const rejected = page.waitForResponse(response =>
+      response.url().endsWith("/api/staff") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: t("es", "staffAddMember") }).click();
+    const failure = await rejected;
+    expect(failure.status()).toBe(409);
+    expect(await failure.json()).toEqual({
+      error: "DIRECTORY_PHONE_ALREADY_REGISTERED",
+      message: directoryErrors.DIRECTORY_PHONE_ALREADY_REGISTERED.en,
+    });
+    await expect(page.getByRole("status")).toHaveText(directoryErrors.DIRECTORY_PHONE_ALREADY_REGISTERED.es);
 
     await page.goto("/orders?store=soho");
     await expect(page.getByRole("heading", { name: t("es", "orders"), exact: true })).toBeVisible();
@@ -36,6 +50,11 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await expect(order.getByText("June S.", { exact: true })).toBeVisible();
     await expect(order.locator("time")).toContainText(dateFormat.format(due));
     await order.getByRole("checkbox").check();
+    // Cents can change eligibility after the order list has rendered.
+    await pool.query("update cents_orders set status='COMPLETED' where store_id='soho' and order_number=$1", [ticket]);
+    await page.getByRole("button", { name: t("es", "ordersCreatePlan") }).click();
+    await expect(page.getByRole("status")).toHaveText(batchErrors.BATCH_ORDERS_INELIGIBLE.es.replace("{orders}", ticket));
+    await pool.query("update cents_orders set status='SUBMITTED' where store_id='soho' and order_number=$1", [ticket]);
     await page.getByRole("button", { name: t("es", "ordersCreatePlan") }).click();
     const batch = await page.getByRole("heading", { name: /^SOHO-B/ }).innerText();
     const prompts: string[] = [];
@@ -49,6 +68,9 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
 
     await page.goto("/board?store=east_village");
     await expect(page.getByRole("heading", { name: t("es", "board"), exact: true })).toBeVisible();
+    await page.getByText(t("es", "boardSections"), { exact: true }).click();
+    await expect(page.getByRole("group", { name: t("es", "boardShowSections") })).toBeVisible();
+    await expect(page.getByRole("button", { name: t("es", "boardSaveSections") })).toBeVisible();
     await page.getByRole("region", { name: t("es", "boardArriving") }).getByRole("link", { name: batch }).click();
     await expect(page.getByRole("heading", { name: t("es", "handoffHistory"), exact: true })).toBeVisible();
     const date = page.locator("ol time").first();

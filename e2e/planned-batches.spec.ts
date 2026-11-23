@@ -1,6 +1,8 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
+import { t } from "../i18n";
+import { en } from "../i18n/en";
 
 test("staff can recover a saved plan after a lost response, edit it and release its orders", async ({
   page,
@@ -40,7 +42,7 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await page.getByRole("checkbox", { name: "#" + numbers[0] }).check();
     const cookies = await context.cookies();
     await context.clearCookies();
-    await page.getByRole("button", { name: "Create planned batch" }).click();
+    await page.getByRole("button", { name: en.ordersCreatePlan }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     const pendingKeys = () =>
       page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("planned-batch:")));
@@ -58,24 +60,24 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       },
       { times: 1 },
     );
-    await page.getByRole("button", { name: "Create planned batch" }).click();
-    await expect(page.getByText("Not confirmed yet.", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: en.ordersCreatePlan }).click();
+    await expect(page.getByText(en.retryToCheck)).toBeVisible();
     await context.clearCookies();
-    await page.getByRole("button", { name: "Check pending change" }).click();
+    await page.getByRole("button", { name: en.checkPending }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     await context.addCookies(cookies);
     await page.goto("/orders?store=soho");
-    await page.getByRole("button", { name: "Check pending change" }).click();
-    await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: en.checkPending }).click();
+    await expect(page.getByText(en.alreadySaved, { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: /^SOHO-B/ })).toBeVisible();
-    await page.getByRole("checkbox", { name: "Remove", exact: true }).check();
-    await page.getByLabel("Reason for removing #" + numbers[0]).fill("Keep at SoHo");
+    await page.getByRole("checkbox", { name: en.ordersRemove, exact: true }).check();
+    await page.getByLabel(t("en", "ordersReasonForRemoving", { number: numbers[0] })).fill("Keep at SoHo");
     await page.getByRole("checkbox", { name: "#" + numbers[1] }).check();
-    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.getByRole("button", { name: en.ordersSaveChanges }).click();
     await expect(page.getByRole("checkbox", { name: "#" + numbers[0] })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "#" + numbers[1] })).toHaveCount(0);
     page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Cancel batch" }).click();
+    await page.getByRole("button", { name: en.ordersCancelBatch }).click();
     await expect(page.getByRole("checkbox", { name: "#" + numbers[1] })).toBeVisible();
     expect(
       (
@@ -83,7 +85,7 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       ).rows.map((r) => r.kind),
     ).toEqual(["createBatch", "updateBatch", "deleteBatch"]);
     await page.getByRole("checkbox", { name: "#" + numbers[1] }).check();
-    await page.getByRole("button", { name: "Create planned batch" }).click();
+    await page.getByRole("button", { name: en.ordersCreatePlan }).click();
     await expect(page.getByRole("heading", { name: /^SOHO-B/ })).toBeVisible();
     const requests: string[] = [];
     await page.route(
@@ -105,14 +107,13 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       { times: 1 },
     );
     page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: "Mark sent" }).click();
-    await expect(page.getByText("Not confirmed yet. Retry to check this change.")).toBeVisible();
+    await page.getByRole("button", { name: en.ordersMarkSent }).click();
+    await expect(page.getByText(en.retryToCheck)).toBeVisible();
     expect(await pendingKeys()).toHaveLength(1);
     const statusCheck = page.waitForRequest((req) => req.url().endsWith("/api/batches?check=1"));
     await page.reload();
     requests.push((await statusCheck).postDataJSON().operationId);
-    await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
-    await expect(page.getByText(/^Marked SOHO-B.* sent\.$/)).toBeVisible();
+    await expect(page.getByText(en.alreadySaved, { exact: true })).toBeVisible();
     expect(await pendingKeys()).toEqual([]);
     expect(requests).toHaveLength(3);
     expect(new Set(requests).size).toBe(1);
@@ -121,33 +122,36 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     );
     const sentBatch = (await pool.query("select batch_id from handoffs where operation_id=$1", [requests[0]]))
       .rows[0].batch_id as string;
+    await expect(page.getByText(t("en", "ordersSentStatus", { batch: sentBatch }))).toBeVisible();
     await page.getByRole("link", { name: "East Village", exact: true }).click();
     await page.getByRole("link", { name: sentBatch, exact: true }).click();
     await expect(page.getByRole("heading", { name: sentBatch, exact: true })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: "Did not travel" })).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: en.didNotTravel })).toHaveCount(0);
     await pool.query("update staff set role='admin' where id=$1", [staff]);
     await page.reload();
-    await page.getByRole("checkbox", { name: "Did not travel" }).check();
-    await page.getByLabel("Reason for #" + numbers[1]).fill("Stayed at SoHo");
+    await page.getByRole("checkbox", { name: en.didNotTravel }).check();
+    await page.getByLabel(t("en", "ordersReasonFor", { number: numbers[1] })).fill("Stayed at SoHo");
     page.once("dialog", (d) => d.accept());
-    await page.getByRole("button", { name: "Record correction" }).click();
+    await page.getByRole("button", { name: en.ordersRecordCorrection }).click();
     await expect(
-      page.getByRole("status").filter({ hasText: "Contents changed, confirm before return" }),
+      page.getByRole("status").filter({ hasText: en.contentsChanged }),
     ).toBeVisible();
-    await expect(page.getByText(/Did not travel · Stayed at SoHo/)).toBeVisible();
+    await expect(page.getByText(`${en.didNotTravel} · Stayed at SoHo`)).toBeVisible();
     await pool.query("update staff set role='staff' where id=$1", [staff]);
     await page.reload();
-    await expect(page.getByText(/Receive the batch on the transfer board/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Confirm contents" })).toHaveCount(0);
-    await page.getByRole("link", { name: "Transfer board" }).click();
+    await expect(page.getByText(en.ordersReceiveBeforeConfirm)).toBeVisible();
+    await expect(page.getByRole("button", { name: en.ordersConfirmContents })).toHaveCount(0);
+    await page.getByRole("link", { name: en.board }).click();
     const arriving = page
-      .getByRole("region", { name: "Arriving" })
+      .getByRole("region", { name: en.boardArriving })
       .getByRole("listitem")
       .filter({ has: page.getByRole("link", { name: sentBatch, exact: true }) });
     page.once("dialog", (d) => d.accept());
-    await arriving.getByRole("button", { name: "Mark received" }).click();
-    await expect(page.getByText("Received · 0 of 0 ready")).toBeVisible();
-    await page.getByRole("link", { name: "Check sent contents" }).click();
+    await arriving.getByRole("button", { name: en.boardReceive }).click();
+    await expect(
+      page.getByText(`${en.phaseReceived} · ${t("en", "boardReadyCount", { count: 0, total: 0 })}`),
+    ).toBeVisible();
+    await page.getByRole("link", { name: en.boardCheckSent }).click();
     await page.route(
       "**/api/batches",
       async (route) => {
@@ -157,10 +161,10 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       { times: 1 },
     );
     page.once("dialog", (d) => d.accept());
-    await page.getByRole("button", { name: "Confirm contents" }).click();
-    await expect(page.getByText("Already saved.", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Robin confirmed no remaining orders/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Confirm contents" })).toHaveCount(0);
+    await page.getByRole("button", { name: en.ordersConfirmContents }).click();
+    await expect(page.getByText(en.alreadySaved, { exact: true })).toBeVisible();
+    await expect(page.getByText(t("en", "ordersConfirmedEmpty", { name: "Robin" }))).toBeVisible();
+    await expect(page.getByRole("button", { name: en.ordersConfirmContents })).toHaveCount(0);
   } finally {
     await pool.query("delete from handoffs where staff_id=$1", [staff]);
     await pool.query(

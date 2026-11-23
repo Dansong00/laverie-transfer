@@ -34,8 +34,8 @@ test("directory reads and writes reject invalid tokens before accessing Postgres
   db.mockClear();
   const invalidSignature = randomUUID() + "." + "0".repeat(64);
   for (const token of [undefined, "malformed", invalidSignature]) {
-    await expect(listStaff(token)).rejects.toMatchObject({ status: 401 });
-    await expect(saveStaffChange(token, {})).rejects.toMatchObject({ status: 401 });
+    await expect(listStaff(token)).rejects.toMatchObject({ status: 401, code: "DIRECTORY_SIGN_IN_REQUIRED" });
+    await expect(saveStaffChange(token, {})).rejects.toMatchObject({ status: 401, code: "DIRECTORY_SIGN_IN_REQUIRED" });
   }
   expect(db).not.toHaveBeenCalled();
 });
@@ -48,8 +48,8 @@ test("profile redacts phones for staff and directory reads and writes require an
   expect(await listStaff(admin.token)).toEqual(
     expect.arrayContaining([expect.objectContaining({ phone: numbers[0] })]),
   );
-  await expect(listStaff(undefined)).rejects.toMatchObject({ status: 401 });
-  await expect(listStaff(person.token)).rejects.toMatchObject({ status: 403 });
+  await expect(listStaff(undefined)).rejects.toMatchObject({ status: 401, code: "DIRECTORY_SIGN_IN_REQUIRED" });
+  await expect(listStaff(person.token)).rejects.toMatchObject({ status: 403, code: "DIRECTORY_ADMIN_REQUIRED" });
   await expect(
     saveStaffChange(person.token, {
       kind: "disableStaff",
@@ -58,7 +58,7 @@ test("profile redacts phones for staff and directory reads and writes require an
       role: "admin",
       operationId: randomUUID(),
     }),
-  ).rejects.toMatchObject({ status: 403 });
+  ).rejects.toMatchObject({ status: 403, code: "DIRECTORY_ADMIN_REQUIRED" });
 });
 
 test("adds once, rejects operation conflicts and duplicate phones, and records the session actor", async () => {
@@ -76,11 +76,13 @@ test("adds once, rejects operation conflicts and duplicate phones, and records t
   expect(both.map((r) => r.replayed).sort()).toEqual([false, true]);
   expect(both[0].member.id).toBe(both[1].member.id);
   await expect(saveStaffChange(admin.token, { ...add, role: "admin" })).rejects.toMatchObject({
-    status: 409,
+    status: 409, code: "DIRECTORY_OPERATION_ID_CONFLICT",
   });
-  await expect(saveStaffChange(other.token, add)).rejects.toMatchObject({ status: 409 });
+  await expect(saveStaffChange(other.token, add)).rejects.toMatchObject({
+    status: 409, code: "DIRECTORY_OPERATION_ID_CONFLICT",
+  });
   await expect(saveStaffChange(admin.token, { ...add, operationId: randomUUID() })).rejects.toMatchObject({
-    status: 409,
+    status: 409, code: "DIRECTORY_PHONE_ALREADY_REGISTERED",
   });
   expect(
     (await pool.query("select staff_id,kind from operations where operation_id=$1", [add.operationId]))
@@ -137,7 +139,7 @@ test.each([
     );
     expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(attempts.find((result) => result.status === "rejected")).toMatchObject({
-      reason: { status: 409, message: expect.stringMatching(/last active admin/i) },
+      reason: { status: 409, code: "DIRECTORY_LAST_ACTIVE_ADMIN" },
     });
     expect(
       (await pool.query("select id from staff where active and role='admin' and phone=any($1)", [numbers]))
@@ -167,6 +169,6 @@ test("admins changing each other's roles authorize against the committed directo
   );
   expect(attempts.filter((result) => result.status === "fulfilled")).toHaveLength(1);
   expect(attempts.find((result) => result.status === "rejected")).toMatchObject({
-    reason: { status: 403 },
+    reason: { status: 403, code: "DIRECTORY_ADMIN_REQUIRED" },
   });
 });
