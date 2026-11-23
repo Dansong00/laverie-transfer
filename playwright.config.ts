@@ -34,6 +34,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       ...process.env,
+      PREVIEW_OTP_ACCESS_CODE: "",
       DATABASE_URL: databaseUrl,
       SESSION_SECRET: "playwright-only-session-key-for-local-tests",
       CENTS_WEBHOOK_HEADER_NAME: "X-Cents-Test",

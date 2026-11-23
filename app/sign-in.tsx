@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { requestCode, verifyCode } from "./sign-in-actions";
 
-export function SignIn() {
-  const [phone, setPhone] = useState("");
+export function SignIn({ accounts }: { accounts: { name: string; phone: string }[] }) {
+  const demo = accounts.length > 0;
+  const [phone, setPhone] = useState(accounts[0]?.phone ?? "");
+  const [accessCode, setAccessCode] = useState("");
+  const [demoCode, setDemoCode] = useState("");
   const [enterCode, setEnterCode] = useState(false);
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
@@ -37,10 +40,10 @@ export function SignIn() {
   function send() {
     setMessage("");
     setCode("");
-    listenForText();
+    if (!demo) listenForText();
     start(async () => {
       try {
-        const result = await requestCode(phone);
+        const result = await requestCode(phone, demo ? accessCode : undefined);
         if (result.error !== undefined) {
           listener.current?.abort();
           setMessage(result.error);
@@ -49,6 +52,10 @@ export function SignIn() {
         setEnterCode(true);
         setSeconds(result.retrySeconds);
         if (result.limited) setMessage("Please wait before requesting another code.");
+        else if (demo) {
+          setDemoCode(result.previewCode ?? "");
+          setMessage("Enter your demo code to continue.");
+        }
         else {
           setMessage("If this number belongs to active staff, a code is on its way.");
         }
@@ -71,7 +78,9 @@ export function SignIn() {
   }
 
   return <>
-    <h1>{enterCode ? "Check your texts" : "Sign in"}</h1>
+    <h1>{enterCode ? (demo ? "Enter your demo code" : "Check your texts") : "Sign in"}</h1>
+    {demo && <p>Preview test mode — SMS disabled. Use a demo account to try transfers with sample orders.</p>}
+    {enterCode && demoCode && <p>Your demo code is <strong>{demoCode}</strong>.</p>}
     <form onSubmit={event => { event.preventDefault(); if (enterCode) verify(); else send(); }}>
       {enterCode ? <>
         <label htmlFor="otp">One-time code</label>
@@ -83,12 +92,20 @@ export function SignIn() {
             {Array.from({ length: 6 }, (_, i) => <span key={i} data-current={i === Math.min(code.length, 5)}>{code[i]}</span>)}
           </div>
         </div>
+      </> : demo ? <>
+        <label htmlFor="account">Demo account</label>
+        <select id="account" value={phone} onChange={event => setPhone(event.target.value)}>
+          {accounts.map(account => <option key={account.phone} value={account.phone}>{account.name}</option>)}
+        </select>
+        <label htmlFor="preview-access">Preview access code</label>
+        <input id="preview-access" type="password" required autoComplete="off" maxLength={1024}
+          value={accessCode} onChange={event => setAccessCode(event.target.value)} />
       </> : <>
         <label htmlFor="phone">Mobile number</label>
         <input id="phone" type="tel" autoComplete="tel" placeholder="(212) 555-0142" required
           maxLength={40} value={phone} onChange={event => setPhone(event.target.value)} />
       </>}
-      <button className="primary" disabled={pending}>{enterCode ? "Continue" : "Send code"}</button>
+      <button className="primary" disabled={pending}>{enterCode ? "Continue" : demo ? "Get demo code" : "Send code"}</button>
     </form>
     <p role="status">{message}</p>
     {enterCode && <>
@@ -97,8 +114,8 @@ export function SignIn() {
       </button>
       <button className="link" disabled={pending} onClick={() => {
         listener.current?.abort();
-        setEnterCode(false); setCode(""); setMessage(""); setSeconds(0);
-      }}>Use a different number</button>
+        setEnterCode(false); setDemoCode(""); setCode(""); setMessage(""); setSeconds(0);
+      }}>{demo ? "Use a different account" : "Use a different number"}</button>
     </>}
   </>;
 }

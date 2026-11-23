@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { CsvError, parse } from "csv-parse";
 import { insertBackfillRow, prepareBackfillRow, reportLocations, ReportError, type ReportRow } from "../cents/backfill";
+import { configuredDemoDatabase } from "../staff/preview-demo";
 import { loadLocalEnv } from "../db/load-env";
 
 const fields = new Map<string, keyof ReportRow>([
@@ -29,6 +30,7 @@ async function main() {
   }
   loadLocalEnv();
   if (!dryRun) {
+    if (configuredDemoDatabase()) throw new ReportError("The Preview demo database accepts sample orders only.");
     if (!process.env.DATABASE_URL) throw new ReportError("Set DATABASE_URL before importing.");
     console.log("Writing to database host", new URL(process.env.DATABASE_URL).hostname);
   }
