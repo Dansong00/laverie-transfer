@@ -16,9 +16,20 @@ export function isStoreAction(change: BatchChange): change is StoreAction {
   );
 }
 
-// A fully corrected batch has no retained order on which to record a receipt handoff.
+// A batch can have no retained orders. Use the versioned operations to distinguish
+// a current receipt from one reversed by an admin on an earlier trip.
+export function travelPhase(batchId: string | typeof batches.id) {
+  return sql<string>`coalesce((select case ${operations.kind}
+    when 'send' then 'sent' when 'receive' then 'received'
+    else ${operations.result} #>> '{result,correction,toPhase}' end
+    from ${operations} where ${operations.batchId} = ${batchId}
+    and ${operations.kind} in ('send','receive','correctTravelPhase')
+    and ${operations.result}->>'ok' = 'true'
+    order by (${operations.result} #>> '{result,version}')::integer desc limit 1), 'planned')`;
+}
+
 export function receiptRecorded(batchId: string | typeof batches.id) {
-  return sql<boolean>`exists (select 1 from ${operations} where ${operations.batchId} = ${batchId} and ${operations.kind}='receive' and ${operations.result}->>'ok'='true')`;
+  return sql<boolean>`${travelPhase(batchId)} = 'received'`;
 }
 
 export async function advanceAtStore(

@@ -132,11 +132,26 @@ export function ContentsForm({
               ? "Departure corrected"
               : h.action === "send"
                 ? "Marked sent"
-                : h.action}{" "}
+                : h.reason
+                  ? `Moved back to ${h.toPhase.replaceAll("_", " ")} · ${h.reason}`
+                  : h.action}{" "}
             · {h.name} · {h.at.toISOString()}
           </li>
         ))}
       </ul>
+      {trip.emptyCorrections.length > 0 && (
+        <>
+          <h3>Empty batch corrections</h3>
+          <ul>
+            {trip.emptyCorrections.map((c) => (
+              <li key={c.operationId}>
+                {c.fromPhase} → {c.toPhase} · {c.reason} · {c.staffName} · {c.at.toISOString()} · Operation{" "}
+                {c.operationId}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {trip.confirmations.length > 0 && (
         <>
           <h3>Contents confirmations</h3>

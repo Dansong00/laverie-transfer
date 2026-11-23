@@ -76,6 +76,7 @@ test("two staff see departures across phones, with independent section preferenc
     await page.getByRole("link", { name: first, exact: true }).click();
     await expect(page.getByText("#" + tickets[0], { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/^Operation /)).toBeVisible();
+    await expect(page.getByText("Move batch back to Planned")).toHaveCount(0);
     await page.getByRole("link", { name: "Back to East Village board" }).click();
     await page.getByText("Board sections", { exact: true }).click();
     await page.getByRole("checkbox", { name: "Arriving", exact: true }).uncheck();
@@ -116,6 +117,24 @@ test("two staff see departures across phones, with independent section preferenc
     await other.getByRole("button", { name: "Mark 3 remaining ready" }).click();
     await expect(other.getByText("Already saved.", { exact: true })).toBeVisible();
     await expect(other.getByText("Ready for return · 4 of 4 ready")).toBeVisible();
+    const ticket = tickets[1];
+    const member = other
+      .getByRole("listitem")
+      .filter({ has: other.getByText("#" + ticket, { exact: true }) })
+      .filter({ hasText: "Move order back to Processing" });
+    await member.getByText("Move order back to Processing").click();
+    await member.getByLabel("Reason for correction").fill("Ticket still needs drying");
+    await member.getByRole("button", { name: "Save correction" }).click();
+    await expect(other.getByText("Processing · 3 of 4 ready")).toBeVisible();
+    await expect(other.getByText("Reason: Ticket still needs drying")).toBeVisible();
+
+    await pool.query("update staff set role='admin' where id=$1", [ids[0]]);
+    await page.goto("/board?store=east_village&batch=" + first);
+    await page.getByText("Move batch back to Planned").click();
+    await page.getByLabel("Reason for correction").fill("Driver has not left yet");
+    await page.getByRole("button", { name: "Save correction" }).click();
+    await expect(page.getByText("Planned · 0 of 1 ready")).toBeVisible();
+    await expect(page.getByText("Reason: Driver has not left yet")).toBeVisible();
   } finally {
     await second.close();
     await pool.query("delete from handoffs where staff_id=any($1::uuid[])", [ids]);

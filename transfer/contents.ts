@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, exists, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import type { StoreId } from "../db/eligible-orders";
 import { batches, batchOrders, handoffs, operations, staff } from "../db/schema";
 import { BatchError, type BatchChange, type OrderKey } from "./commands";
 
-import { receiptRecorded } from "./processing";
+import { correctionReason, listEmptyCorrections } from "./corrections";
+import { receiptRecorded, travelPhase } from "./processing";
 
 type Tx = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 type Batch = typeof batches.$inferSelect;
@@ -30,12 +31,7 @@ export async function sentBatchesAt(store: StoreId) {
       and(
         eq(batches.destination, store),
         isNull(batches.cancelledAt),
-        exists(
-          db
-            .select({ id: handoffs.id })
-            .from(handoffs)
-            .where(and(eq(handoffs.batchId, batches.id), eq(handoffs.action, "send"))),
-        ),
+        sql`${travelPhase(batches.id)} <> 'planned'`,
       ),
     )
     .orderBy(desc(batches.createdAt), asc(batches.id));
@@ -43,7 +39,7 @@ export async function sentBatchesAt(store: StoreId) {
 
 export async function contentsHistory(batchId: string) {
   const db = getDb();
-  const [members, confirmations, custody] = await Promise.all([
+  const [members, confirmations, custody, emptyCorrections] = await Promise.all([
     db
       .select({
         number: batchOrders.orderNumber,
@@ -73,15 +69,20 @@ export async function contentsHistory(batchId: string) {
         at: handoffs.at,
         name: staff.name,
         corrects: handoffs.corrects,
+        reason: correctionReason,
+        toPhase: handoffs.toPhase,
       })
       .from(handoffs)
+      .innerJoin(operations, eq(operations.operationId, handoffs.operationId))
       .innerJoin(staff, eq(staff.id, handoffs.staffId))
       .where(eq(handoffs.batchId, batchId))
       .orderBy(asc(handoffs.at), asc(handoffs.orderNumber)),
+    listEmptyCorrections(db, batchId),
   ]);
   return {
     members,
     custody,
+    emptyCorrections,
     confirmations: confirmations.flatMap((row) => {
       const record = row.result as { ok: boolean; result?: { confirmation?: Confirmation } };
       return record.ok && record.result?.confirmation

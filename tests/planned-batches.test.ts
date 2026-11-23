@@ -5,6 +5,7 @@ import { listEligibleOrders } from "../db/eligible-orders";
 import { sessionToken } from "../staff/session";
 import { saveBatch, plannedBatches, plannedMembers } from "../transfer/planned";
 import { getBatch, listBatchesForStore } from "../transfer/board";
+import { contentsHistory, sentBatchesAt } from "../transfer/contents";
 import { boardSections } from "../db/schema";
 import { getStaffPreferences, updateStaffPreferences } from "../staff/preferences";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
@@ -594,4 +595,156 @@ test("store actions use one version and one operation for the selected orders, i
   expect(await listBatchesForStore("east_village")).toMatchObject([
     { section: "ready_for_return", ready: 4, total: 4, version: 7 },
   ]);
+});
+
+const travelBack = (version: number) => ({
+  ...trip(version),
+  kind: "correctTravelPhase",
+  reason: "Departure recorded early",
+});
+const orderBack = (version: number, orderNumber = "1") => ({
+  ...trip(version),
+  kind: "stepBackOrder",
+  orderKey: { storeId: "soho", orderNumber },
+  reason: "Marked the wrong ticket",
+});
+
+test("staff reverse one store phase at a time with a reason and keep both handoffs", async () => {
+  await saveBatch(token, create(["1", "2"]));
+  await saveBatch(token, send());
+  await saveBatch(token, receive(2));
+  await saveBatch(token, storeOrders(3, "startProcessing", "1", "2"));
+  await saveBatch(token, storeOrders(4, "markReady", "1"));
+  await expect(saveBatch(token, { ...orderBack(5), reason: "  " })).rejects.toMatchObject({ status: 400 });
+  await expect(saveBatch(token, { ...orderBack(5), orderKeys: [] })).rejects.toMatchObject({ status: 400 });
+  expect(await saveBatch(token, orderBack(4))).toMatchObject({ ok: false, status: 409 });
+  expect(await saveBatch(token, orderBack(5, "missing"))).toMatchObject({ ok: false, status: 409 });
+  await expect(saveBatch(token, { ...orderBack(5), store: undefined })).rejects.toMatchObject({
+    status: 400,
+  });
+  await expect(saveBatch(token, { ...orderBack(5), reason: "x".repeat(1001) })).rejects.toMatchObject({
+    status: 400,
+  });
+  const wrongStore = { ...orderBack(5), store: "soho" };
+  expect(await saveBatch(token, wrongStore)).toMatchObject({ ok: false, status: 403 });
+  expect(await getBatch("SOHO-B001")).toMatchObject({
+    version: 5,
+    phaseCounts: { processing: 1, ready_for_return: 1 },
+  });
+  expect(
+    (await pool.query("select id from handoffs where operation_id=$1", [wrongStore.operationId])).rowCount,
+  ).toBe(0);
+  const undo = orderBack(5);
+  expect(await saveBatch(token, undo)).toMatchObject({ ok: true, result: { version: 6 } });
+  expect(await saveBatch(token, undo)).toMatchObject({ ok: true, replayed: true });
+  await expect(saveBatch(token, { ...undo, reason: "Different reason" })).rejects.toMatchObject({
+    status: 409,
+  });
+  expect(await saveBatch(token, orderBack(6))).toMatchObject({ ok: true });
+  expect(await saveBatch(token, orderBack(7))).toMatchObject({ ok: false, status: 409 });
+  const detail = await getBatch("SOHO-B001");
+  expect(detail).toMatchObject({ version: 7, phaseCounts: { processing: 1, received: 1 } });
+  for (const [action, toPhase] of [
+    ["markReady", "processing"],
+    ["startProcessing", "received"],
+  ]) {
+    const original = detail?.history.find(({ handoff: h }) => h.orderNumber === "1" && h.action === action);
+    expect(detail?.history).toContainEqual(
+      expect.objectContaining({
+        reason: undo.reason,
+        handoff: expect.objectContaining({
+          action: "stepBackOrder",
+          orderNumber: "1",
+          staffId,
+          corrects: original!.handoff.id,
+          toPhase,
+        }),
+      }),
+    );
+  }
+});
+
+test("only admins can undo a uniform travel phase, invalidating receipt and reopening the plan", async () => {
+  await saveBatch(token, create(["1", "2"]));
+  await saveBatch(token, send());
+  await expect(saveBatch(token, { ...travelBack(2), reason: "" })).rejects.toMatchObject({ status: 400 });
+  expect(await saveBatch(token, { ...travelBack(2), role: "admin" })).toMatchObject({
+    ok: false,
+    status: 403,
+  });
+  await saveBatch(token, receive(2));
+  expect(await saveBatch(token, travelBack(3))).toMatchObject({ ok: false, status: 403 });
+  await pool.query("update staff set role='admin' where id=$1", [staffId]);
+  await saveBatch(token, storeOrders(3, "startProcessing", "1"));
+  expect(await saveBatch(token, travelBack(4))).toMatchObject({ ok: false, status: 409 });
+  await saveBatch(token, orderBack(4));
+  await saveBatch(token, correction(5, "2"));
+  await saveBatch(token, confirm(6));
+  const cmd = travelBack(7);
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, result: { version: 8 } });
+  expect(await saveBatch(token, cmd)).toMatchObject({ ok: true, replayed: true });
+  expect(await saveBatch(token, confirm(8))).toMatchObject({ ok: false, status: 409 });
+  expect(await getBatch("SOHO-B001")).toMatchObject({ section: "arriving", contentsChanged: true });
+  expect(await saveBatch(token, travelBack(8))).toMatchObject({ ok: true });
+  expect(await plannedBatches("soho")).toMatchObject([{ id: "SOHO-B001", version: 9 }]);
+  expect(await plannedMembers("SOHO-B001")).toEqual([{ orderNumber: "1" }]);
+  expect(await sentBatchesAt("east_village")).toEqual([]);
+  const detail = await getBatch("SOHO-B001");
+  for (const [action, toPhase] of [
+    ["receive", "sent"],
+    ["send", "planned"],
+  ]) {
+    const original = detail?.history.find(({ handoff: h }) => h.action === action && h.orderNumber === "1");
+    expect(detail?.history).toContainEqual(
+      expect.objectContaining({
+        reason: cmd.reason,
+        handoff: expect.objectContaining({
+          action: "correctTravelPhase",
+          toPhase,
+          corrects: original!.handoff.id,
+        }),
+      }),
+    );
+  }
+  expect(await saveBatch(token, send(9))).toMatchObject({ ok: true });
+  expect(await sentBatchesAt("east_village")).toMatchObject([{ received: false }]);
+});
+
+test("an empty outbound batch can reverse receipt without inventing an order handoff", async () => {
+  await pool.query("update staff set role='admin' where id=$1", [staffId]);
+  await saveBatch(token, create(["1"]));
+  await saveBatch(token, send());
+  await saveBatch(token, correction(2, "1"));
+  await saveBatch(token, receive(3));
+  expect(await saveBatch(token, travelBack(4))).toMatchObject({ ok: true });
+  expect(await saveBatch(token, confirm(5))).toMatchObject({ ok: false });
+  expect(await getBatch("SOHO-B001")).toMatchObject({
+    section: "arriving",
+    history: [{ handoff: { action: "send" } }, { handoff: { action: "correctSentMembership" } }],
+    emptyCorrections: [{ fromPhase: "received", toPhase: "sent", reason: "Departure recorded early" }],
+  });
+  expect((await contentsHistory("SOHO-B001")).emptyCorrections).toMatchObject([
+    { fromPhase: "received", toPhase: "sent", reason: "Departure recorded early", staffName: "Taylor" },
+  ]);
+  expect(await saveBatch(token, receive(5))).toMatchObject({ ok: true });
+  expect(await saveBatch(token, confirm(6))).toMatchObject({ ok: true });
+});
+
+test("each batch-wide reversal links all retained orders to the current trip", async () => {
+  await pool.query("update staff set role='admin' where id=$1", [staffId]);
+  await saveBatch(token, create(["1", "2"]));
+  await saveBatch(token, send());
+  await saveBatch(token, travelBack(2));
+  const second = send(3);
+  await saveBatch(token, second);
+  const undo = travelBack(4);
+  expect(await saveBatch(token, undo)).toMatchObject({ ok: true, result: { version: 5 } });
+  expect(
+    (
+      await pool.query(
+        "select h.order_number, original.operation_id from handoffs h join handoffs original on original.id=h.corrects where h.operation_id=$1 order by h.order_number",
+        [undo.operationId],
+      )
+    ).rows,
+  ).toEqual(["1", "2"].map((order_number) => ({ order_number, operation_id: second.operationId })));
 });

@@ -6,6 +6,8 @@ import type { BatchChange } from "../transfer/commands";
 function canCheck(command: BatchChange) {
   return (
     command.kind === "runAction" ||
+    command.kind === "correctTravelPhase" ||
+    command.kind === "stepBackOrder" ||
     command.kind === "confirmContents" ||
     command.kind === "correctSentMembership"
   );
