@@ -1,42 +1,58 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
-import { stores } from "../../db/eligible-orders";
+import { formatLocalDate } from "../../i18n/dates";
+import { t, type Locale } from "../../i18n";
+import { phaseLabel } from "../../i18n/transfer";
+import { stores, type StoreId } from "../../db/eligible-orders";
 import { boardSections } from "../../db/schema";
-import { requestProfile } from "../../staff/request-profile";
+import { requestLocale, requestProfile } from "../../staff/request-profile";
 import { getStaffPreferences } from "../../staff/preferences";
-import { getBatch, listBatchesForStore, sectionNames } from "../../transfer/board";
+import { getBatch, listBatchesForStore, type BoardCard, type Section } from "../../transfer/board";
 import { BoardChanges, CorrectionForm, StoreButton } from "./store-actions";
-import type { StoreId } from "../../db/eligible-orders";
 import { BoardRefresh, SectionFilter } from "./controls";
 import "../sign-in.css";
 import "../orders/orders.css";
 import "./board.css";
 
-const phaseNames: Record<string, string> = {
-  planned: "Planned",
-  sent: "Sent",
-  received: "Received",
-  processing: "Processing",
-  ready_for_return: "Ready for return",
-  return_sent: "Return sent",
-  returned: "Returned",
-};
-const localTime = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "America/New_York",
-});
+function sectionLabel(locale: Locale, section: Section) {
+  switch (section) {
+    case "arriving":
+      return t(locale, "boardArriving");
+    case "returning":
+      return t(locale, "boardReturning");
+    case "recently_returned":
+      return t(locale, "boardRecentlyReturned");
+    default:
+      return phaseLabel(locale, section);
+  }
+}
 
-export default function BoardPage(props: PageProps<"/board">) {
+function cardSummary(locale: Locale, card: BoardCard) {
+  if (card.section === "recently_returned") {
+    return t(locale, "boardReturnedCount", { count: card.phaseCounts.returned, total: card.total });
+  }
+  if (card.section === "planned" && card.total === 0) return t(locale, "emptyPlan");
+  if (
+    (card.section === "received" && card.ready > 0) ||
+    card.section === "processing" ||
+    card.section === "ready_for_return"
+  ) {
+    return t(locale, "boardReadyCount", { count: card.ready, total: card.total });
+  }
+  return t(locale, card.total === 1 ? "boardOneOrder" : "boardManyOrders", { count: card.total });
+}
+
+export default async function BoardPage(props: PageProps<"/board">) {
+  const locale = await requestLocale();
   return (
-    <Suspense fallback={<p>Loading transfer board…</p>}>
-      <Board {...props} />
+    <Suspense fallback={<p>{t(locale, "boardLoading")}</p>}>
+      <Board {...props} locale={locale} />
     </Suspense>
   );
 }
 
-async function Board({ searchParams }: PageProps<"/board">) {
+async function Board({ searchParams, locale }: PageProps<"/board"> & { locale: Locale }) {
   const actor = await requestProfile();
   if (!actor) redirect("/");
   const query = await searchParams;
@@ -47,66 +63,59 @@ async function Board({ searchParams }: PageProps<"/board">) {
   return (
     <main className="eligible-orders transfer-board">
       <BoardRefresh />
-      <Link href="/">Staff home</Link>
-      <h1>Transfer board</h1>
-      <nav aria-label="Store">
+      <Link href="/">{t(locale, "staffHome")}</Link>
+      <h1>{t(locale, "board")}</h1>
+      <nav aria-label={t(locale, "store")}>
         {Object.entries(stores).map(([id, name]) => (
           <Link key={id} href={"/board?store=" + id} aria-current={store === id ? "page" : undefined}>
             {name}
           </Link>
         ))}
       </nav>
-      {query.saved === "again" && <p role="status">Already saved.</p>}
-      <BoardChanges key={actor.staffId + store} staffId={actor.staffId} store={store}>
+      {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
+      <BoardChanges locale={locale} key={actor.staffId + store} staffId={actor.staffId} store={store}>
         {query.batch ? (
-          <BatchDetail id={query.batch} store={store} admin={actor.role === "admin"} />
+          <BatchDetail locale={locale} id={query.batch} store={store} admin={actor.role === "admin"} />
         ) : (
-          <Sections store={store} staffId={actor.staffId} />
+          <Sections locale={locale} store={store} staffId={actor.staffId} />
         )}
       </BoardChanges>
-      {query.batch && <Link href={base}>Back to {stores[store]} board</Link>}
+      {query.batch && <Link href={base}>{t(locale, "boardBackToStore", { store: stores[store] })}</Link>}
     </main>
   );
 }
 
-async function Sections({ store, staffId }: { store: keyof typeof stores; staffId: string }) {
+async function Sections({ store, staffId, locale }: { store: StoreId; staffId: string; locale: Locale }) {
   const [cards, visible] = await Promise.all([listBatchesForStore(store), getStaffPreferences(staffId)]);
   return (
     <>
       <div className="board-tools">
         <Link className="create" href={"/orders?store=" + store}>
-          Create transfer
+          {t(locale, "boardCreateTransfer")}
         </Link>
         <SectionFilter
           key={visible.join(",")}
+          locale={locale}
           visible={visible}
-          choices={boardSections.map((id) => ({ id, name: sectionNames[id] }))}
+          choices={boardSections.map((id) => ({ id, name: sectionLabel(locale, id) }))}
         />
       </div>
-      {!visible.length && <p>All sections are hidden. Choose sections to show above.</p>}
+      {!visible.length && <p>{t(locale, "boardHiddenSections")}</p>}
       {visible.map((section) => {
         const items = cards.filter((card) => card.section === section);
+        const label = sectionLabel(locale, section);
         return (
-          <section key={section} aria-label={sectionNames[section]}>
-            <h2>{sectionNames[section]}</h2>
+          <section key={section} aria-label={label}>
+            <h2>{label}</h2>
             {items.length ? (
               <ul>
                 {items.map((card) => (
                   <li key={card.id}>
                     <Link href={`/board?store=${store}&batch=${encodeURIComponent(card.id)}`}>{card.id}</Link>
-                    <span>
-                      {section === "recently_returned" ? `${card.phaseCounts.returned} of ${card.total} returned`
-                        : card.total === 0 && section === "planned"
-                        ? "Planned (empty)"
-                        : (section === "received" && card.ready > 0) ||
-                            section === "processing" ||
-                            section === "ready_for_return"
-                          ? `${card.ready} of ${card.total} ready`
-                          : `${card.total} ${card.total === 1 ? "order" : "orders"}`}
-                    </span>
+                    <span>{cardSummary(locale, card)}</span>
                     {section === "arriving" && (
                       <StoreButton
-                        label="Mark received"
+                        label={t(locale, "boardReceive")}
                         command={{
                           kind: "runAction",
                           action: "receive",
@@ -117,12 +126,12 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
                         }}
                       />
                     )}
-                    {card.contentsChanged && <small>Contents changed, confirm before return</small>}
+                    {card.contentsChanged && <small>{t(locale, "contentsChanged")}</small>}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p>No batches</p>
+              <p>{t(locale, "boardNoBatches")}</p>
             )}
           </section>
         );
@@ -131,7 +140,12 @@ async function Sections({ store, staffId }: { store: keyof typeof stores; staffI
   );
 }
 
-async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; admin: boolean }) {
+async function BatchDetail({ id, store, admin, locale }: {
+  id: string;
+  store: StoreId;
+  admin: boolean;
+  locale: Locale;
+}) {
   const detail = await getBatch(id);
   if (!detail || ![detail.origin, detail.destination].includes(store)) notFound();
   const { section, orders, history } = detail;
@@ -155,40 +169,44 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
     <section className="batch-detail">
       <h2>{id}</h2>
       <p>
-        {section ? sectionNames[section] : detail.batch.cancelledAt ? "Cancelled" : "No remaining orders"} ·{" "}
+        {section
+          ? sectionLabel(locale, section)
+          : t(locale, detail.batch.cancelledAt ? "boardCancelled" : "boardNoRemaining")} ·{" "}
         {section === "recently_returned"
-          ? `${detail.phaseCounts.returned} of ${detail.total} returned`
-          : section === "returning" ? `${detail.total} returning` : `${detail.ready} of ${detail.total} ready`}
+          ? t(locale, "boardReturnedCount", { count: detail.phaseCounts.returned, total: detail.total })
+          : section === "returning"
+            ? t(locale, "boardReturningCount", { total: detail.total })
+            : t(locale, "boardReadyCount", { count: detail.ready, total: detail.total })}
       </p>
-      {detail.contentsChanged && <p>Contents changed, confirm before return</p>}
+      {detail.contentsChanged && <p>{t(locale, "contentsChanged")}</p>}
       {section === "planned" && store === detail.origin && (
-        <Link href={`/orders?store=${store}&batch=${encodeURIComponent(id)}`}>Edit planned batch</Link>
+        <Link href={`/orders?store=${store}&batch=${encodeURIComponent(id)}`}>{t(locale, "boardEditPlan")}</Link>
       )}
       {store === detail.destination &&
         section &&
         !["planned", "returning", "recently_returned"].includes(section) && (
-          <Link href={`/orders?store=${store}&contents=${encodeURIComponent(id)}`}>Check sent contents</Link>
+          <Link href={`/orders?store=${store}&contents=${encodeURIComponent(id)}`}>{t(locale, "boardCheckSent")}</Link>
         )}
       {atDestination && section === "arriving" && (
-        <StoreButton label="Mark received" command={{ ...command, action: "receive" }} />
+        <StoreButton label={t(locale, "boardReceive")} command={{ ...command, action: "receive" }} />
       )}
       {canCorrectTravel && (
         <CorrectionForm
           key={detail.version}
           command={{ ...correction, kind: "correctTravelPhase" }}
-          label={travel === "sent" ? "Move batch back to Planned" : "Move batch back to Sent"}
+          label={t(locale, travel === "sent" ? "boardBackToPlanned" : "boardBackToSent")}
         />
       )}
-      <h3>Orders</h3>
+      <h3>{t(locale, "boardOrders")}</h3>
       {orders.length ? (
         <ul>
           {orders.map(({ membership, order }) => (
             <li key={membership.id}>
               <strong>#{order.orderNumber}</strong>
-              <span>{phaseNames[membership.phase] ?? membership.phase}</span>
+              <span>{phaseLabel(locale, membership.phase)}</span>
               {atDestination && membership.active && membership.phase === "received" && (
                 <StoreButton
-                  label="Start processing"
+                  label={t(locale, "boardStartProcessing")}
                   command={{
                     ...command,
                     action: "startProcessing",
@@ -198,7 +216,7 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
               )}
               {atDestination && membership.active && membership.phase === "processing" && (
                 <StoreButton
-                  label="Mark ready"
+                  label={t(locale, "boardMarkReady")}
                   command={{
                     ...command,
                     action: "markReady",
@@ -211,11 +229,7 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
                 ["processing", "ready_for_return"].includes(membership.phase) && (
                   <CorrectionForm
                     key={detail.version}
-                    label={
-                      membership.phase === "processing"
-                        ? "Move order back to Received"
-                        : "Move order back to Processing"
-                    }
+                    label={t(locale, membership.phase === "processing" ? "boardBackToReceived" : "boardBackToProcessing")}
                     command={{
                       ...correction,
                       kind: "stepBackOrder",
@@ -224,68 +238,69 @@ async function BatchDetail({ id, store, admin }: { id: string; store: StoreId; a
                     }}
                   />
                 )}
-              {order.isPersonalDetergent && <small>Personal detergent</small>}
+              {order.isPersonalDetergent && <small>{t(locale, "personalDetergent")}</small>}
             </li>
           ))}
         </ul>
       ) : (
-        <p>No remaining orders.</p>
+        <p>{t(locale, "boardNoRemainingSentence")}</p>
       )}
       {atDestination && section === "ready_for_return" && !detail.contentsChanged && (
-        <StoreButton label="Mark return sent" command={{ ...command, action: "sendReturn" }} />
+        <StoreButton label={t(locale, "boardSendReturn")} command={{ ...command, action: "sendReturn" }} />
       )}
       {store === origin && section === "returning" && (
-        <StoreButton label="Acknowledge return" command={{ ...command, action: "acknowledgeReturn" }} />
+        <StoreButton label={t(locale, "boardAcknowledgeReturn")} command={{ ...command, action: "acknowledgeReturn" }} />
       )}
       {atDestination && waiting.length > 1 && (
         <StoreButton
-          label={`Start processing ${waiting.length} received orders`}
+          label={t(locale, "boardStartProcessingMany", { count: waiting.length })}
           command={{ ...command, action: "startProcessing", orderKeys: waiting }}
         />
       )}
       {atDestination && processing.length > 0 && (
         <StoreButton
-          label={`Mark ${processing.length} remaining ready`}
+          label={t(locale, "boardMarkRemainingReady", { count: processing.length })}
           command={{ ...command, action: "markReady", orderKeys: processing }}
         />
       )}
       {detail.emptyCorrections.length > 0 && (
         <section>
-          <h3>Empty batch corrections</h3>
+          <h3>{t(locale, "emptyCorrections")}</h3>
           <ol>
             {detail.emptyCorrections.map((c) => (
               <li key={c.operationId}>
-                {phaseNames[c.fromPhase]} → {phaseNames[c.toPhase]} · {c.reason}
+                {phaseLabel(locale, c.fromPhase)} → {phaseLabel(locale, c.toPhase)} · {c.reason}
                 <small>
-                  {c.staffName} · {localTime.format(c.at)}
+                  {c.staffName} · {formatLocalDate(locale, c.at)}
                 </small>
-                <small>Operation {c.operationId}</small>
+                <small>{t(locale, "operationIdLabel", { id: c.operationId })}</small>
               </li>
             ))}
           </ol>
         </section>
       )}
-      <h3>Handoff history</h3>
+      <h3>{t(locale, "handoffHistory")}</h3>
       {history.length ? (
         <ol>
           {history.map(({ handoff, staffName, reason }) => (
             <li key={handoff.id}>
               <strong>#{handoff.orderNumber}</strong>{" "}
               {handoff.action === "correctSentMembership"
-                ? "Did not travel"
+                ? t(locale, "didNotTravel")
                 : reason
-                  ? `${phaseNames[handoff.fromPhase]} → ${phaseNames[handoff.toPhase]}`
-                  : (phaseNames[handoff.toPhase] ?? handoff.toPhase)}
-              {reason && <small>Reason: {reason}</small>}
+                  ? `${phaseLabel(locale, handoff.fromPhase)} → ${phaseLabel(locale, handoff.toPhase)}`
+                  : phaseLabel(locale, handoff.toPhase)}
+              {reason && <small>{t(locale, "boardReason", { reason })}</small>}
               <small>
-                {staffName} · <time dateTime={handoff.at.toISOString()}>{localTime.format(handoff.at)}</time>
+                {staffName} ·{" "}
+                <time dateTime={handoff.at.toISOString()}>{formatLocalDate(locale, handoff.at)}</time>
               </small>
-              <small>Operation {handoff.operationId}</small>
+              <small>{t(locale, "operationIdLabel", { id: handoff.operationId })}</small>
             </li>
           ))}
         </ol>
       ) : (
-        <p>No handoffs yet.</p>
+        <p>{t(locale, "boardNoHandoffs")}</p>
       )}
     </section>
   );

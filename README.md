@@ -62,7 +62,7 @@ At `/`, enter a mobile number and the six-digit code sent by text. US numbers al
 
 ## Profiles and staff administration
 
-Staff can choose English or Spanish on Profile. The choice carries over to future sign-ins. The sign-in screen uses English.
+Staff can choose English or Spanish on Profile. The choice carries over to future sign-ins and applies to the transfer board, eligible orders, contents checks, and staff directory. Dates use New York time in either language. The sign-in screen uses English.
 
 After sign-in, the profile shows the staff member’s name and current role. Admins also see their registered number and a **Staff admin** link. In the directory, admins can register a number, change someone’s role, or disable their access. Disabling a staff member revokes all of their sessions immediately.
 

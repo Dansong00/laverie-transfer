@@ -2,12 +2,14 @@
 
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { StoreId } from "../../db/eligible-orders";
+import { t, type Locale } from "../../i18n";
 import { useBatchChange } from "../use-batch-change";
 
 import { ContentsForm, type SentTrip } from "./contents-form";
 
 type Plan = { id: string; version: number };
 type Props = {
+  locale: Locale;
   staffId: string;
   origin: StoreId;
   plan?: Plan;
@@ -17,8 +19,8 @@ type Props = {
   admin: boolean;
 };
 
-export function Planner({ staffId, origin, plan, members, children, trip, admin }: Props) {
-  const { busy, message, setMessage, uncertain, submit } = useBatchChange(staffId, origin);
+export function Planner({ locale, staffId, origin, plan, members, children, trip, admin }: Props) {
+  const { busy, message, setMessage, uncertain, submit } = useBatchChange(staffId, origin, locale);
   const [removing, setRemoving] = useState<string[]>([]);
 
   function save(event: FormEvent<HTMLFormElement>) {
@@ -26,7 +28,7 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
     const data = new FormData(event.currentTarget);
     const add = data.getAll("add").map(String);
     if (!plan) {
-      if (!add.length && !window.confirm("Create an empty planned batch?")) return;
+      if (!add.length && !window.confirm(t(locale, "ordersConfirmEmptyPlan"))) return;
       void submit({ kind: "createBatch", origin, add });
     } else {
       const remove = removing.map((orderNumber) => ({
@@ -34,7 +36,7 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
         note: String(data.get("note-" + orderNumber) ?? ""),
       }));
       if (!add.length && !remove.length) {
-        setMessage("Choose orders to add or remove.");
+        setMessage(t(locale, "ordersChooseChanges"));
         return;
       }
       void submit({
@@ -51,7 +53,14 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
   return (
     <>
       {trip ? (
-        <ContentsForm trip={trip} store={origin} admin={admin} disabled={busy || uncertain} submit={submit} />
+        <ContentsForm
+          locale={locale}
+          trip={trip}
+          store={origin}
+          admin={admin}
+          disabled={busy || uncertain}
+          submit={submit}
+        />
       ) : (
         <form onSubmit={save}>
           <fieldset disabled={busy || uncertain}>
@@ -75,11 +84,11 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
                               )
                             }
                           />{" "}
-                          Remove
+                          {t(locale, "ordersRemove")}
                         </label>
                         {removing.includes(number) && (
                           <label className="removal-note">
-                            Reason for removing #{number}
+                            {t(locale, "ordersReasonForRemoving", { number })}
                             <input required name={"note-" + number} />
                           </label>
                         )}
@@ -87,13 +96,13 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
                     ))}
                   </ul>
                 ) : (
-                  <p>Planned (empty)</p>
+                  <p>{t(locale, "emptyPlan")}</p>
                 )}
               </section>
             )}
             {children}
             <button className="save-plan" type="submit">
-              {plan ? "Save changes" : "Create planned batch"}
+              {t(locale, plan ? "ordersSaveChanges" : "ordersCreatePlan")}
             </button>
             {plan && (
               <button
@@ -101,20 +110,23 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
                 disabled={!members.length}
                 onClick={(event) => {
                   if (removing.length || event.currentTarget.form?.querySelector("input[name=add]:checked")) {
-                    setMessage("Save or discard your membership changes before marking this batch sent.");
+                    setMessage(t(locale, "ordersSaveBeforeSend"));
                     return;
                   }
-                  if (window.confirm("Mark " + plan.id + " and all " + members.length + " orders as sent?"))
-                    void submit({
-                      kind: "runAction",
-                      action: "send",
-                      origin,
-                      batchId: plan.id,
-                      expectedVersion: plan.version,
-                    });
+                  const prompt = members.length === 1
+                    ? t(locale, "ordersConfirmSendOne", { batch: plan.id })
+                    : t(locale, "ordersConfirmSendMany", { batch: plan.id, count: members.length });
+                  if (!window.confirm(prompt)) return;
+                  void submit({
+                    kind: "runAction",
+                    action: "send",
+                    origin,
+                    batchId: plan.id,
+                    expectedVersion: plan.version,
+                  });
                 }}
               >
-                Mark sent
+                {t(locale, "ordersMarkSent")}
               </button>
             )}
             {plan && (
@@ -122,7 +134,7 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
                 type="button"
                 className="cancel-plan"
                 onClick={() => {
-                  if (window.confirm("Cancel " + plan.id + " and release its orders?"))
+                  if (window.confirm(t(locale, "ordersConfirmCancel", { batch: plan.id })))
                     void submit({
                       kind: "deleteBatch",
                       origin,
@@ -131,7 +143,7 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
                     });
                 }}
               >
-                Cancel batch
+                {t(locale, "ordersCancelBatch")}
               </button>
             )}
           </fieldset>
@@ -140,10 +152,12 @@ export function Planner({ staffId, origin, plan, members, children, trip, admin 
       <p role="status">{message}</p>
       {uncertain && (
         <button disabled={busy} onClick={() => void submit()}>
-          Check pending change
+          {t(locale, "checkPending")}
         </button>
       )}
-      {message && !uncertain && <button onClick={() => window.location.reload()}>Refresh orders</button>}
+      {message && !uncertain && (
+        <button onClick={() => window.location.reload()}>{t(locale, "ordersRefresh")}</button>
+      )}
     </>
   );
 }

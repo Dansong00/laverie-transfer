@@ -2,6 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import type { StoreId } from "../../db/eligible-orders";
+import { formatLocalDate } from "../../i18n/dates";
+import { t, type Locale } from "../../i18n";
+import { phaseLabel } from "../../i18n/transfer";
 import type { BatchChange } from "../../transfer/commands";
 import type { contentsHistory } from "../../transfer/contents";
 
@@ -13,13 +16,24 @@ export type SentTrip = Awaited<ReturnType<typeof contentsHistory>> & {
   received: boolean;
 };
 
+function HistoryTime({ locale, at }: { locale: Locale; at: Date | string }) {
+  const date = new Date(at);
+  return (
+    <time dateTime={date.toISOString()}>
+      {formatLocalDate(locale, date, "medium")}
+    </time>
+  );
+}
+
 export function ContentsForm({
+  locale,
   trip,
   store,
   admin,
   disabled,
   submit,
 }: {
+  locale: Locale;
   trip: SentTrip;
   store: StoreId;
   admin: boolean;
@@ -37,7 +51,7 @@ export function ContentsForm({
   function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    if (!selected.length || !window.confirm("Record that the selected orders did not travel?")) return;
+    if (!selected.length || !window.confirm(t(locale, "ordersConfirmMissing"))) return;
     submit({
       ...command,
       kind: "correctSentMembership",
@@ -50,15 +64,15 @@ export function ContentsForm({
   return (
     <section>
       <h2>{trip.id}</h2>
-      {trip.changed && <p role="status">Contents changed, confirm before return</p>}
-      <h3>Remaining orders</h3>
-      {!remaining.length && <p>No orders remain in this batch.</p>}
+      {trip.changed && <p role="status">{t(locale, "contentsChanged")}</p>}
+      <h3>{t(locale, "ordersRemaining")}</h3>
+      {!remaining.length && <p>{t(locale, "ordersNoneRemaining")}</p>}
       <form onSubmit={correct}>
         <fieldset disabled={disabled}>
           <ul>
             {remaining.map((m) => (
               <li key={m.number}>
-                <strong>#{m.number}</strong> {m.phase.replaceAll("_", " ")}
+                <strong>#{m.number}</strong> {phaseLabel(locale, m.phase)}
                 {admin && canCorrect && (
                   <label>
                     <input
@@ -70,83 +84,83 @@ export function ContentsForm({
                         )
                       }
                     />{" "}
-                    Did not travel
+                    {t(locale, "didNotTravel")}
                   </label>
                 )}
                 {selected.includes(m.number) && (
                   <label>
-                    Reason for #{m.number}
+                    {t(locale, "ordersReasonFor", { number: m.number })}
                     <input name={"reason-" + m.number} required />
                   </label>
                 )}
               </li>
             ))}
           </ul>
-          {admin && canCorrect && <button disabled={!selected.length}>Record correction</button>}
+          {admin && canCorrect && (
+            <button disabled={!selected.length}>{t(locale, "ordersRecordCorrection")}</button>
+          )}
         </fieldset>
       </form>
       {trip.changed && !trip.received && (
-        <p>Receive the batch on the transfer board before confirming contents.</p>
+        <p>{t(locale, "ordersReceiveBeforeConfirm")}</p>
       )}
       {trip.changed && trip.received && !remaining.some((m) => m.phase === "sent") && (
         <button
           disabled={disabled || selected.length > 0}
           onClick={() => {
-            if (
-              window.confirm(
-                "Have you checked the remaining contents of " +
-                  trip.id +
-                  " at " +
-                  (store === "soho" ? "SoHo" : "East Village") +
-                  "?",
-              )
-            )
-              submit({ ...command, kind: "confirmContents", store });
+            const prompt = t(locale, "ordersConfirmRemaining", {
+              batch: trip.id,
+              store: store === "soho" ? "SoHo" : "East Village",
+            });
+            if (window.confirm(prompt)) submit({ ...command, kind: "confirmContents", store });
           }}
         >
-          Confirm contents
+          {t(locale, "ordersConfirmContents")}
         </button>
       )}
       {trip.members.some((m) => m.removedAt) && (
         <>
-          <h3>Removed orders</h3>
+          <h3>{t(locale, "ordersRemoved")}</h3>
           <ul>
             {trip.members
               .filter((m) => m.removedAt)
               .map((m) => (
                 <li key={m.number + String(m.removedAt)}>
                   #{m.number} ·{" "}
-                  {m.removalKind === "correctSentMembership" ? "Did not travel" : "Removed before departure"}{" "}
-                  · {m.reason} · {m.removedBy} · {new Date(m.removedAt!).toISOString()}
+                  {t(locale,
+                    m.removalKind === "correctSentMembership" ? "didNotTravel" : "ordersRemovedBeforeDeparture",
+                  )}
+                  {" · "}{m.reason} · {m.removedBy} · <HistoryTime locale={locale} at={m.removedAt!} />
                 </li>
               ))}
           </ul>
         </>
       )}
-      <h3>Handoff history</h3>
+      <h3>{t(locale, "handoffHistory")}</h3>
       <ul>
         {trip.custody.map((h) => (
           <li key={h.id}>
             #{h.number} ·{" "}
             {h.action === "correctSentMembership"
-              ? "Departure corrected"
+              ? t(locale, "ordersDepartureCorrected")
               : h.action === "send"
-                ? "Marked sent"
+                ? t(locale, "ordersMarkedSent")
                 : h.reason
-                  ? `Moved back to ${h.toPhase.replaceAll("_", " ")} · ${h.reason}`
-                  : h.action}{" "}
-            · {h.name} · {h.at.toISOString()}
+                  ? t(locale, "ordersMovedBack", { phase: phaseLabel(locale, h.toPhase), reason: h.reason })
+                  : phaseLabel(locale, h.toPhase)}{" "}
+            · {h.name} · <HistoryTime locale={locale} at={h.at} />
           </li>
         ))}
       </ul>
       {trip.emptyCorrections.length > 0 && (
         <>
-          <h3>Empty batch corrections</h3>
+          <h3>{t(locale, "emptyCorrections")}</h3>
           <ul>
             {trip.emptyCorrections.map((c) => (
               <li key={c.operationId}>
-                {c.fromPhase} → {c.toPhase} · {c.reason} · {c.staffName} · {c.at.toISOString()} · Operation{" "}
-                {c.operationId}
+                {phaseLabel(locale, c.fromPhase)} → {phaseLabel(locale, c.toPhase)} · {c.reason} · {c.staffName}
+                {" · "}<HistoryTime locale={locale} at={c.at} />
+                {" · "}{t(locale, "operationIdLabel", { id: c.operationId })}
               </li>
             ))}
           </ul>
@@ -154,12 +168,17 @@ export function ContentsForm({
       )}
       {trip.confirmations.length > 0 && (
         <>
-          <h3>Contents confirmations</h3>
+          <h3>{t(locale, "ordersContentsConfirmations")}</h3>
           <ul>
             {trip.confirmations.map((c) => (
               <li key={c.at}>
-                {c.name} confirmed{" "}
-                {c.orderKeys.map((key) => "#" + key.orderNumber).join(", ") || "no remaining orders"} · {c.at}
+                {c.orderKeys.length
+                  ? t(locale, "ordersConfirmed", {
+                      name: c.name,
+                      numbers: c.orderKeys.map((key) => "#" + key.orderNumber).join(", "),
+                    })
+                  : t(locale, "ordersConfirmedEmpty", { name: c.name })}
+                {" · "}<HistoryTime locale={locale} at={c.at} />
               </li>
             ))}
           </ul>

@@ -1,4 +1,4 @@
-import { locales } from "../i18n";
+import { locales } from "../i18n/locales";
 import { sql } from "drizzle-orm";
 import {
   bigint,
