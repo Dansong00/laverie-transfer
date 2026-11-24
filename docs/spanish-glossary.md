@@ -22,3 +22,13 @@ Also try the receive button and read its confirmation aloud, for example “¿Ma
 Pending staff review for the shared menu and dialogs: Open menu / Abrir menú, Close menu / Cerrar menú, Cancel / Cancelar, Close / Cerrar, Done / Listo.
 
 Pending staff review for the transfer board: “Guardar como predeterminado”, “Actualizado ahora”, “Actualizado hace {seconds} s”, “{count} secciones ocultas”, and “Desmarca una sección para ocultarla. Guarda la selección como predeterminada.”
+
+Pending staff review for batch detail and corrections
+
+- Disponible cuando los {total} estén listos
+- Bloqueado tras el envío: no se pueden añadir pedidos. Las correcciones de traslado las hace un administrador.
+- Los pedidos avanzan una fase a la vez. El envío, la recepción y la devolución se registran en el lote.
+- Historial del pedido
+- {order} está en «{from}». Esto lo mueve una fase, a «{to}». El motivo es obligatorio y quedará en el historial.
+- Todavía no
+- Tablero de {store}

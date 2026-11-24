@@ -74,7 +74,8 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await page.getByRole("button", { name: t("es", "done") }).click();
     await page.getByRole("region", { name: t("es", "boardArriving") }).getByRole("link", { name: batch }).click();
     await expect(page.getByRole("heading", { name: t("es", "handoffHistory"), exact: true })).toBeVisible();
-    const date = page.locator("ol time").first();
+    await page.locator(".handoff-step summary").first().click();
+    const date = page.locator(".handoff-step[open] .handoff-date").first();
     const at = await date.getAttribute("datetime");
     if (!at) throw new Error("Expected a timestamp on the handoff");
     await expect(date).toHaveText(dateFormat.format(new Date(at)));

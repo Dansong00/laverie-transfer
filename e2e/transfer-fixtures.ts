@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import type pg from "pg";
 
 export async function signIn(client: BrowserContext, pool: pg.Pool, ids: string[], phone: string) {
@@ -42,4 +42,9 @@ export async function cleanTransfers(pool: pg.Pool, ids: string[], tickets: stri
   await pool.query("delete from cents_orders where order_number=any($1)", [tickets]);
   await pool.query("delete from cents_raw_events where body->'order'->>'orderCode'=any($1::text[])", [tickets]);
   await pool.end();
+}
+
+export async function confirmBoardAction(page: Page, label: string) {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("dialog", { name: label, exact: true }).getByRole("button", { name: label, exact: true }).click();
 }
