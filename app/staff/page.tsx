@@ -12,7 +12,7 @@ import { Directory } from "./directory";
 export default async function StaffPage() {
   const locale = await requestLocale();
   return (
-    <Suspense fallback={<p>{t(locale, "loading")}</p>}>
+    <Suspense fallback={<p className="e2e-body flow-sub">{t(locale, "loading")}</p>}>
       <AdminAccess locale={locale} />
     </Suspense>
   );
@@ -33,9 +33,10 @@ async function AdminAccess({ locale }: { locale: Locale }) {
   return (
     <>
       <AppHeader actor={actor} locale={locale} />
-      <main className="sign-in staff-page">
-        <BackButton href="/" label={t(locale, "profile")} />
-        <h1>{t(locale, "directory")}</h1>
+      <main className="e2e-body staff-page">
+        <div className="back-row"><BackButton href="/" label={t(locale, "profile")} /></div>
+        <h1 className="flow-title">{t(locale, "directory")}</h1>
+        <p className="flow-sub">{t(locale, "staffIntro")}</p>
         <Directory {...directory} locale={locale} />
       </main>
     </>

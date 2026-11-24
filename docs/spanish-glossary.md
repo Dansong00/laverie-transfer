@@ -39,3 +39,12 @@ Pending staff review for transfer planning
 - 1 pedido de {store} seleccionado
 - {count} pedidos de {store} seleccionados
 - ¿Guardar los cambios del lote {batch}?
+
+Pending staff review for Profile and Staff admin
+
+- Esta es la cuenta que quedará registrada en las entregas.
+- Tienda
+- No está vinculada a una tienda. Cambia de tablero para trabajar en SoHo o East Village.
+- Solo un administrador puede añadir o deshabilitar personal. Al deshabilitar a alguien, su sesión se cierra de inmediato.
+- La persona nueva podrá iniciar sesión con un código enviado por SMS a este número.
+- Tú
