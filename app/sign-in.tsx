@@ -7,6 +7,7 @@ export function SignIn() {
   const [phone, setPhone] = useState("");
   const [enterCode, setEnterCode] = useState(false);
   const [code, setCode] = useState("");
+  const [codeFocused, setCodeFocused] = useState(false);
   const [message, setMessage] = useState("");
   const [seconds, setSeconds] = useState(0);
   const [pending, start] = useTransition();
@@ -52,7 +53,6 @@ export function SignIn() {
           setMessage("Please wait before requesting another code.");
         } else {
           setEnterCode(true);
-          setMessage("If this number belongs to active staff, a code is on its way.");
         }
       } catch {
         listener.current?.abort();
@@ -76,31 +76,43 @@ export function SignIn() {
     <h1>{enterCode ? "Check your texts" : "Sign in"}</h1>
     <form onSubmit={event => { event.preventDefault(); if (enterCode) verify(); else send(); }}>
       {enterCode ? <>
-        <label htmlFor="otp">One-time code</label>
-        <div className="otp">
-          <input ref={input} id="otp" type="text" inputMode="numeric" autoComplete="one-time-code"
-            maxLength={6} pattern="[0-9]{6}" value={code} required
+        <label className="field-label" htmlFor="otp">One-time code</label>
+        <div className="otp-wrap">
+          <input ref={input} className="otp-real" id="otp" name="otp" type="text"
+            inputMode="numeric" autoComplete="one-time-code" autoCapitalize="off" autoCorrect="off"
+            spellCheck={false} minLength={6} maxLength={6} pattern="[0-9]*" value={code} required
+            aria-describedby={message ? "sign-in-error" : undefined}
+            onFocus={() => setCodeFocused(true)} onBlur={() => setCodeFocused(false)}
             onChange={event => setCode(event.target.value.replace(/\D/g, ""))} />
-          <div className="slots" aria-hidden="true">
-            {Array.from({ length: 6 }, (_, i) => <span key={i} data-current={i === Math.min(code.length, 5)}>{code[i]}</span>)}
+          <div className="otp-slots" aria-hidden="true">
+            {Array.from({ length: 6 }, (_, i) => {
+              const active = codeFocused && i === Math.min(code.length, 5);
+              return <span key={i} className={[code[i] && "is-filled", active && "is-active"].filter(Boolean).join(" ")}>{code[i]}</span>;
+            })}
           </div>
         </div>
       </> : <>
-        <label htmlFor="phone">Mobile number</label>
-        <input id="phone" type="tel" autoComplete="tel" placeholder="(212) 555-0142" required
-          maxLength={40} value={phone} onChange={event => setPhone(event.target.value)} />
+        <label className="field-label" htmlFor="phone">Mobile number</label>
+        <input className="tel-input" id="phone" name="phone" type="tel" inputMode="tel"
+          autoComplete="tel" placeholder="(212) 555-0142" required maxLength={40}
+          aria-describedby={message ? "sign-in-error" : undefined}
+          value={phone} onChange={event => setPhone(event.target.value)} />
       </>}
-      <button className="primary" disabled={pending}>{enterCode ? "Continue" : "Send code"}</button>
+      {message && <p className="field-error" id="sign-in-error" role="status">{message}</p>}
+      <button className="btn" type="submit" disabled={pending}>{enterCode ? "Continue" : "Send code"}</button>
     </form>
-    <p role="status">{message}</p>
     {enterCode && <>
-      <button className="link" disabled={pending || seconds > 0} onClick={send}>
-        {seconds > 0 ? `Resend in ${seconds}s` : "Resend code"}
-      </button>
-      <button className="link" disabled={pending} onClick={() => {
-        listener.current?.abort();
-        setEnterCode(false); setCode(""); setMessage(""); setSeconds(0);
-      }}>Use a different number</button>
+      <p className="link-row">Didn’t get it?{" "}
+        <button type="button" className="resend" disabled={pending || seconds > 0} onClick={send}>
+          {seconds > 0 ? `Resend in ${seconds}s` : "Resend code"}
+        </button>
+      </p>
+      <p className="link-row">
+        <button type="button" className="resend" disabled={pending} onClick={() => {
+          listener.current?.abort();
+          setEnterCode(false); setCode(""); setMessage(""); setSeconds(0);
+        }}>Use a different number</button>
+      </p>
     </>}
   </>;
 }
