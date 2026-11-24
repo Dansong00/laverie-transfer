@@ -18,3 +18,5 @@ Before launch, a Spanish-speaking Laverie staff member should walk through one t
 | Eligible orders | Pedidos elegibles | Orders available to add to a transfer |
 
 Also try the receive button and read its confirmation aloud, for example “¿Marcar como recibido para el lote SOHO-B123?” Does it clearly say which batch is being received? Check that “Por llegar” and “De regreso” distinguish the outbound and return legs at both stores.
+
+Pending staff review for the shared menu and dialogs: Open menu / Abrir menú, Close menu / Cerrar menú, Cancel / Cancelar, Close / Cerrar, Done / Listo.

@@ -1,6 +1,11 @@
 import type { en } from "./en";
 
 export const es = {
+  menuOpen: "Abrir menú",
+  menuClose: "Cerrar menú",
+  cancel: "Cancelar",
+  close: "Cerrar",
+  done: "Listo",
   profile: "Perfil",
   name: "Nombre",
   role: "Rol",

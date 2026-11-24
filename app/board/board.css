@@ -1,9 +1,0 @@
-.transfer-board section { margin-block: 1.4rem 2rem; }
-.transfer-board h2 { margin: 0 0 .65rem; }
-.transfer-board section > p { margin: .5rem 0; color: #514b47; }
-.transfer-board .board-tools { display: flex; align-items: start; justify-content: space-between; gap: 1rem; margin-block: 1rem 1.5rem; }
-.transfer-board .create { background: #a93e08; color: #fff; padding: .7rem 1.1rem; border-radius: 2rem; text-decoration: none; font-weight: 650; }
-.transfer-board summary { padding-block: .7rem; cursor: pointer; }
-.transfer-board details label { display: block; padding: .35rem 0; }
-.transfer-board details button { margin-top: .6rem; }
-.transfer-board .batch-detail ol { padding: 0; list-style: none; }

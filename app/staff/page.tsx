@@ -1,23 +1,20 @@
-import Link from "next/link";
+import { AppHeader } from "../ui/app-header";
+import { BackButton } from "../ui/back-button";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { t, type Locale } from "../../i18n";
 import { DirectoryError, readDirectory } from "../../staff/directory";
-import { requestLocale } from "../../staff/request-profile";
+import { requestLocale, requestProfile } from "../../staff/request-profile";
 import { sessionCookie } from "../../staff/session";
 import { Directory } from "./directory";
-import "../sign-in.css";
-import "./staff.css";
 
 export default async function StaffPage() {
   const locale = await requestLocale();
   return (
-    <main className="sign-in staff-page">
-      <Suspense fallback={<p>{t(locale, "loading")}</p>}>
-        <AdminAccess locale={locale} />
-      </Suspense>
-    </main>
+    <Suspense fallback={<p>{t(locale, "loading")}</p>}>
+      <AdminAccess locale={locale} />
+    </Suspense>
   );
 }
 
@@ -31,13 +28,16 @@ async function AdminAccess({ locale }: { locale: Locale }) {
     if (error instanceof DirectoryError && (error.status === 401 || error.status === 403)) redirect("/");
     throw error;
   }
+  const actor = await requestProfile();
+  if (!actor) redirect("/");
   return (
     <>
-      <Link href="/" className="back">
-        ← {t(locale, "profile")}
-      </Link>
-      <h1>{t(locale, "directory")}</h1>
-      <Directory {...directory} locale={locale} />
+      <AppHeader actor={actor} locale={locale} />
+      <main className="sign-in staff-page">
+        <BackButton href="/" label={t(locale, "profile")} />
+        <h1>{t(locale, "directory")}</h1>
+        <Directory {...directory} locale={locale} />
+      </main>
     </>
   );
 }

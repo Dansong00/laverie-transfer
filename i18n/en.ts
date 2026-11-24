@@ -1,4 +1,9 @@
 export const en = {
+  menuOpen: "Open menu",
+  menuClose: "Close menu",
+  cancel: "Cancel",
+  close: "Close",
+  done: "Done",
   profile: "Profile",
   name: "Name",
   role: "Role",
