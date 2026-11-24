@@ -16,6 +16,7 @@
     "cents:backfill": "tsx scripts/cents-backfill.ts",
     "cents:send": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/cents-send.mjs",
     "db:show": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/db-show.mjs",
+    "demo:seed": "tsx scripts/seed-preview-demo.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
     "check:invariants": "node scripts/check-invariants.mjs",

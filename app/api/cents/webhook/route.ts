@@ -1,6 +1,9 @@
 import { ingestCentsEvent, InvalidCentsEvent, UnauthorizedCentsEvent } from "../../../../cents/ingest";
 
+import { configuredDemoDatabase } from "../../../../staff/preview-demo";
+
 export async function POST(request: Request) {
+  if (configuredDemoDatabase()) return new Response(null, { status: 503 });
   const receivedAt = new Date();
   try {
     const name = process.env.CENTS_WEBHOOK_HEADER_NAME;

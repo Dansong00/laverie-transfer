@@ -4,6 +4,7 @@ import { t } from "../i18n";
 import { Suspense } from "react";
 import { requestLocale, requestProfile } from "../staff/request-profile";
 import { saveLanguage, signOut } from "./sign-in-actions";
+import { demoAccounts, demoEnabled } from "../staff/preview-demo";
 import { SignIn } from "./sign-in";
 import "./sign-in.css";
 
@@ -18,7 +19,7 @@ export default function Home() {
 
 async function StaffAccess() {
   const actor = await requestProfile();
-  if (!actor) return <SignIn />;
+  if (!actor) return <SignIn accounts={demoEnabled() ? demoAccounts.map(({ name, phone }) => ({ name, phone })) : []} />;
   const locale = await requestLocale();
   return <>
     <h1>{t(locale, "profile")}</h1>

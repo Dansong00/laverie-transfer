@@ -6,9 +6,9 @@ import { afterAll, beforeAll, beforeEach, vi } from "vitest";
 import * as client from "../../db/client";
 
 // Concurrent requests need independent connections to the same isolated tables.
-export function setupStaffTestDatabase() {
+export function setupStaffTestDatabase(prefix: "staff_test_" | "laverie_preview_demo_" = "staff_test_") {
   const parent = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const name = "staff_test_" + randomUUID().replaceAll("-", "");
+  const name = prefix + randomUUID().replaceAll("-", "");
   const url = new URL(process.env.DATABASE_URL!);
   url.pathname = "/" + name;
   url.searchParams.delete("dbname");

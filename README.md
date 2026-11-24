@@ -178,3 +178,11 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
 5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of the latest migration listed in `drizzle/meta/_journal.json` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.
+
+### Temporary staff demo on the Preview branch
+
+Create an empty Postgres database named `laverie_preview_demo` (or append an underscore and a lowercase alphanumeric suffix). Use a fresh database and Preview-only session secret. Point the branch-specific Preview `DATABASE_URL` at it. Set `PREVIEW_OTP_ACCESS_CODE` to a private random value of at least 16 bytes and give it to testers privately. Keep Cents imports and live data out of this database. Its webhook rejects deliveries and the CSV importer refuses writes.
+
+With those Preview settings loaded, run `pnpm db:migrate` and `pnpm demo:seed`. The seed adds two fictional staff identities and three sample orders per store. Rerunning it preserves transfer progress. Redeploy the Preview branch after changing its settings. Choose a demo account at sign-in, enter the access code, and enter the displayed one-time code. The two profiles record actions under their demo names.
+
+To retire the demo, remove the Preview access code and switch the branch back to its normal Preview database and session secret before redeploying. This isolates existing demo sessions as well as new sign-ins.

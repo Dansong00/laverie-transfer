@@ -11,13 +11,14 @@ import { requestSignInCode, verifySignInCode } from "../staff/codes";
 import { revokeSession, sessionCookie } from "../staff/session";
 import { setting } from "../staff/settings";
 
-export async function requestCode(phone: string) {
+export async function requestCode(phone: string, accessCode?: string) {
   try {
-    const result = await requestSignInCode(phone, signInClientIp(await headers()));
+    const result = await requestSignInCode(phone, signInClientIp(await headers()), accessCode);
     if (result.kind === "accepted" && result.deliver) after(result.deliver);
+    if (result.kind === "denied") return { error: "Check your Preview access code and try again." } as const;
     if (result.kind === "invalid") return { error: "Enter a valid mobile number." } as const;
     const retrySeconds = result.kind === "limited" ? result.retrySeconds : Math.max(30, setting("OTP_RESEND_SECONDS", 30));
-    return { retrySeconds, limited: result.kind === "limited" } as const;
+    return { retrySeconds, previewCode: result.kind === "demo" ? result.code : undefined, limited: result.kind === "limited" } as const;
   } catch {
     return { error: "Sign-in is unavailable. Try again shortly." } as const;
   }

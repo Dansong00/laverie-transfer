@@ -7,8 +7,11 @@ import { sessionToken } from "./session";
 import { normalizePhone, setting } from "./settings";
 import { matches, sign } from "./signature";
 import { sendCode } from "./sms";
+import { acceptsDemoCredential, configuredDemoDatabase, demoAccounts, demoEnabled } from "./preview-demo";
 
 type CodeRequest =
+  | { kind: "denied" }
+  | { kind: "demo"; code: string }
   | { kind: "invalid" }
   | { kind: "limited"; retrySeconds: number }
   | { kind: "accepted"; deliver?: () => Promise<void> };
@@ -49,10 +52,14 @@ async function recentFailures(tx: AuthTransaction, phone: string) {
   return row.total;
 }
 
-export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1"): Promise<CodeRequest> {
+export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1", accessCode?: unknown): Promise<CodeRequest> {
   const phone = normalizePhone(input);
   if (!phone) return { kind: "invalid" };
   if (!await reserveTraffic("request", clientIp)) return { kind: "limited", retrySeconds: 60 };
+  const demo = demoEnabled();
+  const fixture = demoAccounts.find(account => account.phone === phone);
+  if (demo && !acceptsDemoCredential(accessCode)) return { kind: "denied" };
+  if (demo && !fixture) return { kind: "accepted" };
   return getDb().transaction(async tx => {
     await tx.execute(lockPhone(phone));
     const now = new Date();
@@ -68,16 +75,20 @@ export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1"):
     );
     if (nextSend > +now) return { kind: "limited", retrySeconds: Math.ceil((nextSend - +now) / 1000) };
     await tx.insert(otpRequests).values({ phone, requestedAt: now });
-    const [person] = await tx.select({ id: staff.id }).from(staff).where(activePhone(phone)).for("share");
+    const [person] = await tx.select({ id: staff.id }).from(staff).where(and(activePhone(phone),
+      demo ? and(eq(staff.role, "staff"), sql`current_database() = ${configuredDemoDatabase()}`) : undefined,
+    )).for("share");
     if (!person || await recentFailures(tx, phone) >= phoneFailureLimit) return { kind: "accepted" };
 
+    if (demo && person.id !== fixture?.id) return { kind: "accepted" };
     const id = randomUUID();
     const code = randomInt(1000000).toString().padStart(6, "0");
     const ttl = Math.min(10, setting("OTP_TTL_MINUTES", 10)) * 60000;
     await tx.update(otpCodes).set({ consumedAt: now }).where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)));
     await tx.insert(otpCodes).values({
-      id, phone, codeHash: sign(`otp:${id}:${code}`), createdAt: now, expiresAt: new Date(+now + ttl),
+      id, phone, codeHash: sign(demo ? `demo:${person.id}:${id}:${code}` : `otp:${id}:${code}`), createdAt: now, expiresAt: new Date(+now + ttl),
     });
+    if (demo) return { kind: "demo", code };
     return { kind: "accepted", deliver: async () => {
       try {
         await sendCode(phone, code);
@@ -96,7 +107,7 @@ export async function verifySignInCode(input: unknown, code: unknown, clientIp =
   const result = await getDb().transaction(async tx => {
     await tx.execute(lockPhone(phone));
     const now = new Date();
-    const [person] = await tx.select({ id: staff.id }).from(staff).where(activePhone(phone)).for("share");
+    const [person] = await tx.select({ id: staff.id, role: staff.role, database: sql<string>`current_database()` }).from(staff).where(activePhone(phone)).for("share");
     if (!person) return null;
     const failures = await recentFailures(tx, phone);
     if (failures >= phoneFailureLimit) return null;
@@ -104,7 +115,10 @@ export async function verifySignInCode(input: unknown, code: unknown, clientIp =
       .where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)))
       .orderBy(desc(otpCodes.createdAt)).limit(1);
     if (!otp || otp.expiresAt <= now || otp.failedAttempts >= Math.min(5, setting("OTP_MAX_ATTEMPTS", 5))) return null;
-    if (!matches(otp.codeHash, sign(`otp:${otp.id}:${code}`))) {
+    const fixture = demoEnabled() && demoAccounts.find(account => account.phone === phone && account.id === person.id);
+    const validDemo = fixture && person.role === "staff" && person.database === configuredDemoDatabase()
+      && matches(otp.codeHash, sign(`demo:${person.id}:${otp.id}:${code}`));
+    if (!validDemo && !matches(otp.codeHash, sign(`otp:${otp.id}:${code}`))) {
       await tx.update(otpCodes).set({ failedAttempts: otp.failedAttempts + 1 }).where(eq(otpCodes.id, otp.id));
       await tx.delete(otpFailures).where(and(
         eq(otpFailures.phone, phone), lte(otpFailures.failedAt, failureCutoff),
