@@ -1,3 +1,4 @@
+import { confirmAction } from "./transfer-fixtures";
 import { createHmac, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
@@ -73,11 +74,11 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await page.getByRole("checkbox", { name: en.ordersRemove, exact: true }).check();
     await page.getByLabel(t("en", "ordersReasonForRemoving", { number: numbers[0] })).fill("Keep at SoHo");
     await page.getByRole("checkbox", { name: "#" + numbers[1] }).check();
-    await page.getByRole("button", { name: en.ordersSaveChanges }).click();
+    const firstBatch = await page.getByRole("heading", { name: /^SOHO-B/ }).innerText();
+    await confirmAction(page, en.ordersSaveChanges, t("en", "ordersConfirmSave", { batch: firstBatch }));
     await expect(page.getByRole("checkbox", { name: "#" + numbers[0] })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: "#" + numbers[1] })).toHaveCount(0);
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: en.ordersCancelBatch }).click();
+    await confirmAction(page, en.ordersCancelBatch, t("en", "ordersConfirmCancel", { batch: firstBatch }));
     await expect(page.getByRole("checkbox", { name: "#" + numbers[1] })).toBeVisible();
     expect(
       (
@@ -106,8 +107,7 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       },
       { times: 1 },
     );
-    page.once("dialog", (dialog) => dialog.accept());
-    await page.getByRole("button", { name: en.ordersMarkSent }).click();
+    await confirmAction(page, en.ordersMarkSent, t("en", "ordersConfirmSendOne", { batch: await page.getByRole("heading", { name: /^SOHO-B/ }).innerText() }));
     await expect(page.getByText(en.retryToCheck)).toBeVisible();
     expect(await pendingKeys()).toHaveLength(1);
     const statusCheck = page.waitForRequest((req) => req.url().endsWith("/api/batches?check=1"));
@@ -131,8 +131,7 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await page.reload();
     await page.getByRole("checkbox", { name: en.didNotTravel }).check();
     await page.getByLabel(t("en", "ordersReasonFor", { number: numbers[1] })).fill("Stayed at SoHo");
-    page.once("dialog", (d) => d.accept());
-    await page.getByRole("button", { name: en.ordersRecordCorrection }).click();
+    await confirmAction(page, en.ordersRecordCorrection, en.ordersConfirmMissing);
     await expect(
       page.getByRole("status").filter({ hasText: en.contentsChanged }),
     ).toBeVisible();
@@ -141,7 +140,7 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await page.reload();
     await expect(page.getByText(en.ordersReceiveBeforeConfirm)).toBeVisible();
     await expect(page.getByRole("button", { name: en.ordersConfirmContents })).toHaveCount(0);
-    await page.getByRole("link", { name: en.board }).click();
+    await page.getByRole("link", { name: en.board, exact: true }).click();
     const arriving = page
       .getByRole("region", { name: en.boardArriving })
       .getByRole("listitem")
@@ -162,8 +161,12 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       },
       { times: 1 },
     );
-    page.once("dialog", (d) => d.accept());
     await page.getByRole("button", { name: en.ordersConfirmContents }).click();
+    const diff = page.getByRole("dialog", { name: en.ordersConfirmContents });
+    await expect(diff.locator("p")).toHaveText(t("en", "ordersConfirmRemaining", { batch: sentBatch, store: "East Village" }));
+    await expect(diff.getByText(en.ordersNoneRemaining)).toBeVisible();
+    await expect(diff.locator("del")).toHaveText("#" + numbers[1]);
+    await diff.getByRole("button", { name: en.ordersConfirmContents }).click();
     await expect(page.getByText(en.alreadySaved, { exact: true })).toBeVisible();
     await expect(page.getByText(t("en", "ordersConfirmedEmpty", { name: "Robin" }))).toBeVisible();
     await expect(page.getByRole("button", { name: en.ordersConfirmContents })).toHaveCount(0);

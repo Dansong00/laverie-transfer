@@ -1,4 +1,6 @@
 import { AppHeader } from "../ui/app-header";
+import { BackButton } from "../ui/back-button";
+import { Toast } from "../ui/toast";
 import { sentBatchesAt, contentsHistory } from "../../transfer/contents";
 import { plannedBatches, plannedMembers } from "../../transfer/planned";
 import { Planner } from "./planner";
@@ -13,7 +15,7 @@ import { requestLocale, requestProfile } from "../../staff/request-profile";
 export default async function Orders(props: PageProps<"/orders">) {
   const locale = await requestLocale();
   return (
-    <Suspense fallback={<p>{t(locale, "ordersLoading")}</p>}>
+    <Suspense fallback={<p className="e2e-body flow-sub">{t(locale, "ordersLoading")}</p>}>
       <EligibleOrders {...props} locale={locale} />
     </Suspense>
   );
@@ -38,97 +40,104 @@ async function EligibleOrders({ searchParams, locale }: PageProps<"/orders"> & {
   if (query.batch && !plan) redirect("/orders?store=" + store);
   const members = plan ? await plannedMembers(plan.id) : [];
 
+  const origin = trip ? (trip.origin === "east_village" ? "east_village" : "soho") : store;
+  const count = trip ? history?.members.filter(member => !member.removedAt).length : plan ? members.length : undefined;
+  const sentMessage = typeof query.sent === "string" ? t(locale, "ordersSentStatus", { batch: query.sent }) : "";
+
   return (
     <>
       <AppHeader actor={actor} locale={locale} store={store} />
-      <main className="eligible-orders">
-        <h1>{t(locale, "orders")}</h1>
-        <nav aria-label={t(locale, "store")}>
-          {Object.entries(stores).map(([id, name]) => (
-            <Link key={id} href={`/orders?store=${id}`} aria-current={id === store ? "page" : undefined}>
-              {name}
-            </Link>
-          ))}
-        </nav>
-        {typeof query.sent === "string" && (
-          <p role="status">{t(locale, "ordersSentStatus", { batch: query.sent })}</p>
-        )}
-        {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
-        <Planner
-          key={JSON.stringify([store, plan?.id, plan?.version, trip?.id, trip?.version])}
-          locale={locale}
-          trip={
-            trip && history
-              ? { ...trip, origin: trip.origin === "soho" ? "soho" : "east_village", ...history }
-              : undefined
-          }
-          admin={actor.role === "admin"}
-          staffId={actor.staffId}
-          origin={store}
-          plan={plan}
-          members={members.map((member) => member.orderNumber)}
-        >
-          <h2>{t(locale, "ordersEligibleAt", { store: stores[store] })}</h2>
-          {orders.length === 0 ? (
-            <p>{t(locale, "ordersNoneEligible", { store: stores[store] })}</p>
-          ) : (
-            <ul>
-              {orders.map((order) => (
-                <li key={order.orderNumber}>
-                  <label>
-                    <input type="checkbox" name="add" value={order.orderNumber} />{" "}
-                    <strong>#{order.orderNumber}</strong>
-                  </label>
-                  <span>
-                    {[order.customerFirstName, order.customerLastInitial && order.customerLastInitial + "."]
-                      .filter(Boolean)
-                      .join(" ")}
-                  </span>
-                  <small>
-                    {order.dueAt ? (
-                      <time dateTime={order.dueAt.toISOString()}>
-                        {t(locale, "ordersDue", {
-                          date: formatLocalDate(locale, order.dueAt),
-                        })}
-                      </time>
-                    ) : (
-                      t(locale, "ordersNoDueDate")
-                    )}
-                  </small>
-                  {order.isPersonalDetergent && <small>{t(locale, "personalDetergent")}</small>}
-                </li>
-              ))}
-            </ul>
+      <div className={store === "soho" ? "store-soho" : "store-ev"}>
+        <div className="store-band" />
+        <main className="e2e-body orders-screen">
+          <div className="back-row">
+            <BackButton href={`/board?store=${store}${trip ? "&batch=" + encodeURIComponent(trip.id) : ""}`}
+              label={t(locale, "batchStoreBoard", { store: stores[store] })} />
+          </div>
+          <h1 className="flow-title">{trip?.id ?? plan?.id ?? t(locale, "boardCreateTransfer")}</h1>
+          <p className="flow-sub">
+            {stores[origin]} → {stores[origin === "soho" ? "east_village" : "soho"]}
+            {count !== undefined && <> · {t(locale, count === 1 ? "boardOneOrder" : "boardManyOrders", { count })}</>}
+            {plan && <> · {t(locale, "phasePlanned")}</>}
+          </p>
+          <Toast message={sentMessage || (query.saved === "again" ? t(locale, "alreadySaved") : "")}
+            detail={sentMessage && query.saved === "again" ? t(locale, "alreadySaved") : undefined} />
+          <Planner
+            key={JSON.stringify([store, plan?.id, plan?.version, trip?.id, trip?.version])}
+            locale={locale}
+            trip={
+              trip && history
+                ? { ...trip, origin, ...history }
+                : undefined
+            }
+            admin={actor.role === "admin"}
+            staffId={actor.staffId}
+            origin={store}
+            storeName={stores[store]}
+            plan={plan}
+            members={members.map((member) => member.orderNumber)}
+          >
+            <section className="card orders-card">
+              <h2 className="group-label">{t(locale, "ordersEligibleAt", { store: stores[store] })}</h2>
+              {orders.length === 0 ? (
+                <p className="empty-group">{t(locale, "ordersNoneEligible", { store: stores[store] })}</p>
+              ) : (
+                <ul>
+                  {orders.map((order) => (
+                    <li key={order.orderNumber}>
+                      <label className="order-row selectable">
+                        <input aria-label={"#" + order.orderNumber} className="check" type="checkbox" name="add" value={order.orderNumber} />
+                        <strong className="onum">#{order.orderNumber}</strong>
+                        <span className="customer-name">
+                          {[order.customerFirstName, order.customerLastInitial && order.customerLastInitial + "."].filter(Boolean).join(" ")}
+                        </span>
+                        {order.isPersonalDetergent && <span className="badge badge-hold">{t(locale, "personalDetergent")}</span>}
+                        <small className="due">
+                          {order.dueAt ? (
+                            <time dateTime={order.dueAt.toISOString()}>{t(locale, "ordersDue", { date: formatLocalDate(locale, order.dueAt) })}</time>
+                          ) : t(locale, "ordersNoDueDate")}
+                        </small>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </Planner>
+          {listedTrips.length > 0 && (
+            <section className="card orders-card">
+              <h2 className="group-label">{t(locale, "ordersSentTo", { store: stores[store] })}</h2>
+              <ul>
+                {listedTrips.map((trip) => (
+                  <li key={trip.id}>
+                    <Link className="orders-link" href={`/orders?store=${store}&contents=${trip.id}`}>{trip.id}</Link>
+                    {trip.changed && <> · {t(locale, "contentsChanged")}</>}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
-        </Planner>
-        {listedTrips.length > 0 && (
-          <section>
-            <h2>{t(locale, "ordersSentTo", { store: stores[store] })}</h2>
-            <ul>
-              {listedTrips.map((trip) => (
-                <li key={trip.id}>
-                  <Link href={`/orders?store=${store}&contents=${trip.id}`}>{trip.id}</Link>
-                  {trip.changed && <> · {t(locale, "contentsChanged")}</>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {trip && <Link href={`/orders?store=${store}`}>{t(locale, "ordersBackToEligible")}</Link>}
-        {plans.length > 0 && (
-          <section>
-            <h2>{t(locale, "ordersPlannedBatches")}</h2>
-            <ul>
-              {plans.map((batch) => (
-                <li key={batch.id}>
-                  <Link href={`/orders?store=${store}&batch=${batch.id}`}>{batch.id}</Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-        {plan && <Link href={`/orders?store=${store}`}>{t(locale, "ordersPlanAnother")}</Link>}
-      </main>
+          {trip && <Link className="orders-link" href={`/orders?store=${store}`}>{t(locale, "ordersBackToEligible")}</Link>}
+          {plans.length > 0 && (
+            <section className="card orders-card">
+              <h2 className="group-label">{t(locale, "ordersPlannedBatches")}</h2>
+              <ul>
+                {plans.map((batch) => (
+                  <li key={batch.id}>
+                    <Link className="orders-link" href={`/orders?store=${store}&batch=${batch.id}`}>{batch.id}</Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {plan && <Link className="orders-link" href={`/orders?store=${store}`}>{t(locale, "ordersPlanAnother")}</Link>}
+          <nav className="switch" aria-label={t(locale, "store")}>
+            {Object.entries(stores).map(([id, name]) => (
+              <Link key={id} href={`/orders?store=${id}`} aria-current={id === store ? "page" : undefined}>{name}</Link>
+            ))}
+          </nav>
+        </main>
+      </div>
     </>
   );
 }

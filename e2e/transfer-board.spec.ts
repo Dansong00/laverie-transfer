@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import pg from "pg";
 import { t } from "../i18n";
 import { en } from "../i18n/en";
-import { cleanTransfers, confirmBoardAction, signIn } from "./transfer-fixtures";
+import { cleanTransfers, confirmAction, signIn } from "./transfer-fixtures";
 
 test("two staff see departures across phones, with independent section preferences", async ({
   browser,
@@ -82,9 +82,9 @@ test("two staff see departures across phones, with independent section preferenc
     await expect(sheet.locator("p")).toHaveText(t("en", "boardConfirmAction", { action: en.boardReceive, id: next }));
     await sheet.getByRole("button", { name: en.boardReceive }).click();
     await other.locator("button.order-row").filter({ hasText: tickets[1] }).click();
-    await confirmBoardAction(other, en.boardStartProcessing);
+    await confirmAction(other, en.boardStartProcessing);
     await other.locator("button.order-row").filter({ hasText: tickets[1] }).click();
-    await confirmBoardAction(other, en.boardMarkReady);
+    await confirmAction(other, en.boardMarkReady);
     await expect(
       other.getByText(`${en.phaseReceived} · ${t("en", "boardReadyCount", { count: 1, total: 4 })}`),
     ).toBeVisible();
@@ -94,7 +94,7 @@ test("two staff see departures across phones, with independent section preferenc
       received.getByText(t("en", "boardReadyCount", { count: 1, total: 4 }), { exact: true }),
     ).toBeVisible();
     await received.getByRole("link", { name: next, exact: true }).click();
-    await confirmBoardAction(other, t("en", "boardStartProcessingMany", { count: 3 }));
+    await confirmAction(other, t("en", "boardStartProcessingMany", { count: 3 }));
     await expect(
       other.getByText(`${en.phaseProcessing} · ${t("en", "boardReadyCount", { count: 1, total: 4 })}`),
     ).toBeVisible();
@@ -106,7 +106,7 @@ test("two staff see departures across phones, with independent section preferenc
       },
       { times: 1 },
     );
-    await confirmBoardAction(other, t("en", "boardMarkRemainingReady", { count: 3 }));
+    await confirmAction(other, t("en", "boardMarkRemainingReady", { count: 3 }));
     await expect(other.getByText(en.alreadySaved, { exact: true })).toBeVisible();
     await expect(
       other.getByText(`${en.phaseReady} · ${t("en", "boardReadyCount", { count: 4, total: 4 })}`),
@@ -177,14 +177,14 @@ for (const [origin, destination] of [
       }
       const detail = "/board?batch=" + batch.batchId + "&store=";
       await page.goto(detail + destination);
-      await confirmBoardAction(page, en.boardSendReturn);
+      await confirmAction(page, en.boardSendReturn);
       await expect(
         page.getByText(`${en.boardReturning} · ${t("en", "boardReturningCount", { total: 2 })}`),
       ).toBeVisible();
       await expect(page.getByRole("button", { name: en.boardAcknowledgeReturn })).toHaveCount(0);
       await pool.query("update cents_orders set status='COMPLETED' where order_number=$1", [tickets[0]]);
       await page.goto(detail + origin);
-      await confirmBoardAction(page, en.boardAcknowledgeReturn);
+      await confirmAction(page, en.boardAcknowledgeReturn);
       await expect(
         page.getByText(`${en.boardRecentlyReturned} · ${t("en", "boardReturnedCount", { count: 2, total: 2 })}`),
       ).toBeVisible();

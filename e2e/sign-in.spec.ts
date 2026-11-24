@@ -43,10 +43,10 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect(page.getByRole("link", { name: "SoHo", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-SO")).toBeVisible();
     await expect(page.getByText("#E2E-S7-EV")).toHaveCount(0);
-    await page.getByRole("link", { name: "East Village" }).click();
+    await page.getByRole("link", { name: "East Village", exact: true }).click();
     await expect(page).toHaveURL(/store=east_village$/);
     await page.reload();
-    await expect(page.getByRole("link", { name: "East Village" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "East Village", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-EV")).toBeVisible();
     await expect(page.getByText("#E2E-S7-SO")).toHaveCount(0);
     await page.getByRole("button", { name: en.menuOpen }).click();

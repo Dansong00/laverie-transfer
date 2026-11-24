@@ -16,7 +16,6 @@
 .row-meta { min-width: 0; overflow-wrap: anywhere; color: hsl(var(--muted-foreground)); }
 .op-id { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .switch a[aria-current=page] { background: hsl(var(--store-switch-on, var(--foreground))); color: hsl(var(--store-switch-on-fg, var(--background))); }
-.eligible-orders > nav { top: 60px; }
 .sign-in .primary { font-family: var(--font-cta); }
 .sign-in a.link { text-decoration: none; }
 .profile-page > a.link { display: flex; align-items: center; }
@@ -74,3 +73,32 @@ a.order-row, button.order-row { grid-template-columns: auto minmax(0,1fr) max-co
 .handoff-step summary .when { float: right; padding-top: 0; }
 .handoff-date, .handoff-step small { display: block; }
 .handoff-date { font-size: 12px; }
+
+.orders-screen fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+.orders-screen ul, .orders-screen ol { list-style: none; margin: 0; padding: 0; }
+.orders-screen .group-label { margin: 0; }
+.orders-screen li + li { border-top: 1px solid hsl(var(--border)); }
+.orders-screen .order-row.selectable {
+  grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr) auto;
+  gap: 4px 8px; padding-block: 10px;
+}
+.orders-screen .selectable:has(:checked) { background: hsl(var(--accent)); }
+.orders-screen .selectable .badge { grid-column: 4; grid-row: 1 / span 2; white-space: normal; max-width: 6rem; text-align: center; }
+.orders-screen .customer-name, .orders-screen .onum { overflow-wrap: anywhere; }
+.orders-screen .due { grid-column: 2 / 4; color: hsl(var(--muted-foreground)); }
+.orders-screen .member-row { grid-template-columns: minmax(0, auto) 1fr auto; }
+.orders-screen .remove-toggle { grid-column: 3; display: flex; align-items: center; gap: 4px; min-height: 44px; color: hsl(var(--destructive)); cursor: pointer; }
+.remove-toggle input { accent-color: hsl(var(--destructive)); }
+.removal-note { display: grid; gap: 4px; padding: 4px 16px 12px; font-size: 14px; }
+.removal-note input { width: 100%; min-height: 44px; padding: 8px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); font: inherit; }
+.orders-link { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 12px; }
+.orders-screen .switch { margin: 12px auto; }
+.orders-screen .history-entry { padding: 10px 16px; font-size: 14px; overflow-wrap: anywhere; }
+.orders-screen .btn + .card, .orders-screen .history-card { margin-top: 12px; }
+.contents-diff { font-size: 14px; overflow-wrap: anywhere; }
+.contents-diff dt { font-weight: 650; }
+.contents-diff dd { margin: 4px 0 10px; }
+.orders-screen .contents-step { grid-column: 2 / -1; overflow-wrap: anywhere; }
+.orders-screen .confirm-contents { margin-block: 8px; }
+.orders-screen .btn:disabled { background: hsl(var(--secondary)); border-color: hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+.remove-toggle input { width: 18px; height: 18px; }

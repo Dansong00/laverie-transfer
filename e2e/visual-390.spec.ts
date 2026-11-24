@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
 import { t } from "../i18n";
-import { cleanTransfers, confirmBoardAction, signIn } from "./transfer-fixtures";
+import { cleanTransfers, confirmAction, signIn } from "./transfer-fixtures";
 
 for (const locale of ["en", "es"] as const) {
   for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }]) {
@@ -48,8 +48,7 @@ for (const locale of ["en", "es"] as const) {
         await expect(heading).toBeVisible();
         const batch = await heading.innerText();
         await capture("planned");
-        page.once("dialog", dialog => dialog.accept());
-        await page.getByRole("button", { name: t(locale, "ordersMarkSent") }).click();
+        await confirmAction(page, t(locale, "ordersMarkSent"), t(locale, "ordersConfirmSendOne", { batch }));
         await expect(page.getByText(t(locale, "ordersSentStatus", { batch }))).toBeVisible();
         await page.goto("/board?store=east_village");
         const trip = page.getByRole("link", { name: batch, exact: true });
@@ -58,7 +57,7 @@ for (const locale of ["en", "es"] as const) {
         await trip.click();
         await expect(page.getByRole("heading", { name: batch, exact: true })).toBeVisible();
         await capture("batch");
-        await confirmBoardAction(page, t(locale, "boardReceive"));
+        await confirmAction(page, t(locale, "boardReceive"));
         await expect(page.getByRole("button", { name: t(locale, "boardReceive") })).toHaveCount(0);
         await expect(page.getByRole("heading", { name: t(locale, "handoffHistory") })).toBeVisible();
         await page.locator("button.order-row").filter({ hasText: ticket }).click();

@@ -5,7 +5,7 @@ import pg from "pg";
 import { t } from "../i18n";
 import { en } from "../i18n/en";
 import fixture from "../fixtures/order-created.json";
-import { cleanTransfers, confirmBoardAction, signIn } from "./transfer-fixtures";
+import { cleanTransfers, confirmAction, signIn } from "./transfer-fixtures";
 
 test("four SoHo orders complete a round trip with a Cents completion and a handoff history for each order", async ({
   browser,
@@ -53,7 +53,6 @@ test("four SoHo orders complete a round trip with a Cents completion and a hando
   try {
     await signIn(context, pool, staff, "+12125550194");
     await signIn(destination, pool, staff, "+12125550195");
-    soho.on("dialog", dialog => dialog.accept());
     await deliver("order_created");
 
     await soho.goto("/orders?store=soho");
@@ -62,19 +61,19 @@ test("four SoHo orders complete a round trip with a Cents completion and a hando
     }
     await soho.getByRole("button", { name: en.ordersCreatePlan }).click();
     const batch = await soho.getByRole("heading", { name: /^SOHO-B/ }).innerText();
-    await soho.getByRole("button", { name: en.ordersMarkSent, exact: true }).click();
+    await confirmAction(soho, en.ordersMarkSent, t("en", "ordersConfirmSendMany", { batch, count: 4 }));
     await expect(soho.getByText(t("en", "ordersSentStatus", { batch }))).toBeVisible();
 
     await eastVillage.goto("/board?store=east_village");
     const arrivals = eastVillage.getByRole("region", { name: en.boardArriving });
     await arrivals.getByRole("link", { name: batch, exact: true }).click();
-    await confirmBoardAction(eastVillage, en.boardReceive);
-    await confirmBoardAction(eastVillage, t("en", "boardStartProcessingMany", { count: 4 }));
-    await confirmBoardAction(eastVillage, t("en", "boardMarkRemainingReady", { count: 4 }));
+    await confirmAction(eastVillage, en.boardReceive);
+    await confirmAction(eastVillage, t("en", "boardStartProcessingMany", { count: 4 }));
+    await confirmAction(eastVillage, t("en", "boardMarkRemainingReady", { count: 4 }));
     await expect(
       eastVillage.getByText(`${en.phaseReady} · ${t("en", "boardReadyCount", { count: 4, total: 4 })}`),
     ).toBeVisible();
-    await confirmBoardAction(eastVillage, en.boardSendReturn);
+    await confirmAction(eastVillage, en.boardSendReturn);
     await expect(
       eastVillage.getByText(`${en.boardReturning} · ${t("en", "boardReturningCount", { total: 4 })}`),
     ).toBeVisible();
@@ -85,7 +84,7 @@ test("four SoHo orders complete a round trip with a Cents completion and a hando
     await soho.goto("/board?store=soho");
     const returns = soho.getByRole("region", { name: en.boardReturning });
     await returns.getByRole("link", { name: batch, exact: true }).click();
-    await confirmBoardAction(soho, en.boardAcknowledgeReturn);
+    await confirmAction(soho, en.boardAcknowledgeReturn);
     await expect(
       soho.getByText(`${en.boardRecentlyReturned} · ${t("en", "boardReturnedCount", { count: 4, total: 4 })}`),
     ).toBeVisible();
