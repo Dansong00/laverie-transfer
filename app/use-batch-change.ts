@@ -91,6 +91,11 @@ export function useBatchChange(staffId: string, origin: StoreId, locale: Locale)
         else if (result.result.sent) params.set("sent", result.result.batchId);
         else if (!result.result.cancelled) params.set("batch", result.result.batchId);
         if (result.replayed) params.set("saved", "again");
+        if (result.result.board && !result.replayed) {
+          // Carry confirmed success across the full-page navigation.
+          try { sessionStorage.setItem(`board-saved:${staffId}:${origin}`, result.result.batchId); }
+          catch { /* Feedback is optional when tab storage is unavailable. */ }
+        }
         navigating = true;
         window.location.replace((result.result.board ? "/board?" : "/orders?") + params);
       } catch {
@@ -103,7 +108,7 @@ export function useBatchChange(staffId: string, origin: StoreId, locale: Locale)
         }
       }
     },
-    [locale, origin, prefix],
+    [locale, origin, prefix, staffId],
   );
 
   useEffect(() => {

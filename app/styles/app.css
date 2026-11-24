@@ -58,3 +58,19 @@ a.order-row, button.order-row { grid-template-columns: auto minmax(0,1fr) max-co
 .board-batches li + li { border-top: 1px solid hsl(var(--border)); }
 .board-batches .batch-row { border-top: 0; }
 .board-batches .row-actions { padding: 0 14px 12px; }
+
+.batch-screen .group-label { margin: 0; padding: 5px 0; }
+.batch-screen .order-row { border-inline: 0; border-top: 0; background: transparent; color: inherit; }
+.batch-screen .order-row:last-child { border-bottom: 0; }
+.batch-screen .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-card .handoff-step { grid-column: 2 / -1; min-width: 0; }
+.handoff-step summary { cursor: pointer; }
+.history-card .step .correction { grid-column: 2 / -1; }
+.handoff-orders, .confirm-orders { display: flex; gap: 4px 10px; flex-wrap: wrap; }
+.handoff-orders, .handoff-step small { font-size: 12px; }
+.batch-screen .correction-callout small { display: block; }
+.confirm-orders { list-style: none; padding: 0; }
+.batch-screen > .banner, .board-list > .banner { margin: 12px 16px; }
+.handoff-step summary .when { float: right; padding-top: 0; }
+.handoff-date, .handoff-step small { display: block; }
+.handoff-date { font-size: 12px; }
