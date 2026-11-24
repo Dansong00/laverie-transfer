@@ -1,5 +1,5 @@
 import { AppHeader } from "./ui/app-header";
-import Link from "next/link";
+import { BackButton } from "./ui/back-button";
 import Image from "next/image";
 import { t } from "../i18n";
 import { Suspense } from "react";
@@ -20,24 +20,27 @@ async function StaffAccess() {
   const locale = await requestLocale();
   return <>
     <AppHeader actor={actor} locale={locale} />
-    <main className="sign-in profile-page">
-      <h1>{t(locale, "profile")}</h1>
-      <dl className="profile">
-        <dt>{t(locale, "name")}</dt><dd>{actor.name}</dd>
-        <dt>{t(locale, "role")}</dt><dd>{t(locale, actor.role === "admin" ? "admin" : "staff")}</dd>
-        {actor.phone && <><dt>{t(locale, "phone")}</dt><dd>{actor.phone}</dd></>}
-      </dl>
-      <Link className="link" href="/orders">{t(locale, "orders")}</Link>
-      {actor.role === "admin" && <Link className="link" href="/staff">{t(locale, "directory")}</Link>}
-      <form action={saveLanguage}>
-        <label htmlFor="locale">{t(locale, "language")}</label>
-        <select id="locale" name="locale" defaultValue={locale} key={locale}>
+    <main className="e2e-body profile-page">
+      <div className="back-row"><BackButton href="/board" label={t(locale, "batchStoreBoard", { store: "SoHo" })} /></div>
+      <h1 className="flow-title">{t(locale, "profile")}</h1>
+      <p className="flow-sub">{t(locale, "profileNote")}</p>
+      <div className="card profile-card">
+        <dl>
+          <dt>{t(locale, "name")}</dt><dd>{actor.name}</dd>
+          <dt>{t(locale, "role")}</dt><dd>{t(locale, actor.role === "admin" ? "admin" : "staff")}</dd>
+          {actor.phone && <><dt>{t(locale, "phone")}</dt><dd>{actor.phone}</dd></>}
+          <dt>{t(locale, "profileStore")}</dt><dd>{t(locale, "profileStoreValue")}</dd>
+        </dl>
+      </div>
+      <form className="card profile-card" action={saveLanguage}>
+        <label className="field-label" htmlFor="locale">{t(locale, "language")}</label>
+        <select className="input" id="locale" name="locale" defaultValue={locale} key={locale}>
           <option value="en" lang="en">English</option>
           <option value="es" lang="es">Español</option>
         </select>
-        <button className="link">{t(locale, "saveLanguage")}</button>
+        <button className="btn btn-outline">{t(locale, "saveLanguage")}</button>
       </form>
-      <form action={signOut}><button className="primary">{t(locale, "signOut")}</button></form>
+      <form className="profile-signout" action={signOut}><button className="btn btn-outline btn-danger">{t(locale, "signOut")}</button></form>
     </main>
   </>;
 }

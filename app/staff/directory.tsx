@@ -1,6 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ConfirmSheet } from "../ui/confirm-sheet";
+import { Sheet } from "../ui/sheet";
+import { Toast } from "../ui/toast";
 import { useRouter } from "next/navigation";
 import { t, type Locale } from "../../i18n";
 import { translateApiError } from "../../i18n/api-errors";
@@ -12,16 +15,21 @@ export function Directory({ actorId, members, locale }: {
   locale: Locale;
 }) {
   const router = useRouter();
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [confirmation, setConfirmation] = useState<{
+    title: string; prompt: string; change: Exclude<StaffChange, { kind: "addStaff" }>;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
-  const addForm = useRef<HTMLFormElement>(null);
 
   async function save(change: StaffChange) {
     if (saving.current) return;
     saving.current = true;
     setBusy(true);
-    setMessage("");
+    setError("");
+    setSuccess("");
     try {
       // Preserve only a request fingerprint and its ID so retries survive a refresh
       // without leaving staff names or numbers in browser storage.
@@ -48,97 +56,90 @@ export function Directory({ actorId, members, locale }: {
         return;
       }
       if (!response.ok) {
-        setMessage(translateApiError(locale, result));
+        setError(translateApiError(locale, result));
         return;
       }
-      setMessage(t(locale, result.replayed ? "alreadySaved" : "saved"));
-      if (change.kind === "addStaff") addForm.current?.reset();
+      setSuccess(t(locale, result.replayed ? "alreadySaved" : "saved"));
+      if (change.kind === "addStaff") setAdding(false);
       if (change.kind !== "addStaff" && change.targetStaffId === actorId) window.location.replace("/");
       else router.refresh();
     } catch {
-      setMessage(t(locale, "staffRetryChange"));
+      setError(t(locale, "staffRetryChange"));
     } finally {
       saving.current = false;
       setBusy(false);
     }
   }
 
+  function closeAdd() {
+    if (saving.current) return;
+    setAdding(false);
+    setError("");
+  }
+
+  const status = <p role="status" aria-live="polite" className={error ? (adding ? "field-error" : "banner banner-warn") : "sr-only"}>{error}</p>;
   return (
     <>
-      <p role="status" aria-live="polite">
-        {message}
-      </p>
-      <details className="add-staff">
-        <summary>{t(locale, "staffAdd")}</summary>
-        <form
-          ref={addForm}
-          onSubmit={(event) => {
-            event.preventDefault();
-            const fields = new FormData(event.currentTarget);
-            void save({
-              kind: "addStaff",
-              name: String(fields.get("name")).trim(),
-              phone: String(fields.get("phone")).trim(),
-              role: fields.get("role") === "admin" ? "admin" : "staff",
-            });
-          }}
-        >
-          <label htmlFor="name">{t(locale, "name")}</label>
-          <input id="name" name="name" required maxLength={120} />
-          <label htmlFor="phone">{t(locale, "mobileNumber")}</label>
-          <input id="phone" name="phone" type="tel" required maxLength={40} />
-          <label htmlFor="role">{t(locale, "role")}</label>
-          <select id="role" name="role">
-            <option value="staff">{t(locale, "staff")}</option>
-            <option value="admin">{t(locale, "admin")}</option>
-          </select>
-          <button className="primary" disabled={busy}>
-            {t(locale, "staffAddMember")}
-          </button>
+      <button type="button" className="btn" disabled={busy} onClick={() => { setError(""); setSuccess(""); setAdding(true); }}>
+        {t(locale, "staffAdd")}
+      </button>
+      {!adding && (success ? <Toast message={success} /> : status)}
+      {adding && <Sheet open title={t(locale, "staffAdd")} closeLabel={t(locale, "cancel")} onClose={closeAdd}>
+        <p>{t(locale, "staffAddNote")}</p>
+        <form onSubmit={event => {
+          event.preventDefault();
+          const fields = new FormData(event.currentTarget);
+          void save({
+            kind: "addStaff",
+            name: String(fields.get("name")).trim(),
+            phone: String(fields.get("phone")).trim(),
+            role: fields.get("role") === "admin" ? "admin" : "staff",
+          });
+        }}>
+          <fieldset className="add-fields" disabled={busy}>
+            <label className="field-label" htmlFor="name">{t(locale, "name")}</label>
+            <input className="input" id="name" name="name" required maxLength={120} />
+            <label className="field-label" htmlFor="phone">{t(locale, "mobileNumber")}</label>
+            <input className="input" id="phone" name="phone" type="tel" required maxLength={40} />
+            <label className="field-label" htmlFor="role">{t(locale, "role")}</label>
+            <select className="input" id="role" name="role">
+              <option value="staff">{t(locale, "staff")}</option>
+              <option value="admin">{t(locale, "admin")}</option>
+            </select>
+            {status}
+            <button className="btn">{t(locale, "staffAddMember")}</button>
+          </fieldset>
         </form>
-      </details>
-      <ul className="staff-list">
-        {members.map((person) => (
-          <li key={person.id}>
-            <h2>{person.name}</h2>
-            <p>{person.phone}</p>
-            <p>
-              {t(locale, person.role === "admin" ? "admin" : "staff")} · {t(locale, person.active ? "staffActive" : "staffDisabled")}
-            </p>
-            <div className="controls">
-              {person.active && (
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    const role = person.role === "staff" ? "admin" : "staff";
-                    const prompt = t(locale, role === "admin" ? "staffConfirmMakeAdmin" : "staffConfirmMakeStaff", {
-                      name: person.name,
-                    });
-                    if (window.confirm(prompt)) {
-                      void save({ kind: "updateStaffRole", targetStaffId: person.id, role });
-                    }
-                  }}
-                >
-                  {t(locale, person.role === "staff" ? "staffMakeAdmin" : "staffMakeStaff")}
-                </button>
-              )}
-              <button
-                disabled={busy}
-                onClick={() => {
-                  const prompt = t(locale, person.active ? "staffConfirmDisable" : "staffConfirmEnable", {
-                    name: person.name,
-                  });
-                  if (window.confirm(prompt)) {
-                    void save({ kind: person.active ? "disableStaff" : "enableStaff", targetStaffId: person.id });
-                  }
-                }}
-              >
-                {t(locale, person.active ? "staffDisable" : "staffEnable")}
-              </button>
+      </Sheet>}
+      <ul className="card staff-list">
+        {members.map(person => {
+          const newRole = person.role === "staff" ? "admin" : "staff";
+          const roleLabel = t(locale, newRole === "admin" ? "staffMakeAdmin" : "staffMakeStaff");
+          const accessLabel = t(locale, person.active ? "staffDisable" : "staffEnable");
+          return <li className="staff-row-admin" key={person.id}>
+            <div className={person.active ? "staff-summary" : "staff-summary inactive"}>
+              <h2 className="staff-name">{person.name}</h2>
+              <p className="staff-meta">{t(locale, person.role === "admin" ? "admin" : "staff")} · {person.phone} · {t(locale, person.active ? "staffActive" : "staffDisabled")}</p>
             </div>
-          </li>
-        ))}
+            {person.id === actorId ? <span className="badge">{t(locale, "staffYou")}</span>
+              : !person.active && <span className="badge">{t(locale, "staffDisabled")}</span>}
+            <div className="staff-actions">
+              {person.active && <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setConfirmation({
+                title: roleLabel, prompt: t(locale, newRole === "admin" ? "staffConfirmMakeAdmin" : "staffConfirmMakeStaff", { name: person.name }),
+                change: { kind: "updateStaffRole", targetStaffId: person.id, role: newRole },
+              })}>{roleLabel}</button>}
+              <button type="button" className={person.active ? "btn btn-destructive" : "btn btn-outline"} disabled={busy}
+                onClick={() => setConfirmation({
+                  title: accessLabel, prompt: t(locale, person.active ? "staffConfirmDisable" : "staffConfirmEnable", { name: person.name }),
+                  change: { kind: person.active ? "disableStaff" : "enableStaff", targetStaffId: person.id },
+                })}>{accessLabel}</button>
+            </div>
+          </li>;
+        })}
       </ul>
+      {confirmation && <ConfirmSheet open title={confirmation.title} prompt={confirmation.prompt} disabled={busy}
+        destructive={confirmation.change.kind === "disableStaff"} cancelLabel={t(locale, "cancel")}
+        onClose={() => setConfirmation(null)} onConfirm={() => void save(confirmation.change)} />}
     </>
   );
 }

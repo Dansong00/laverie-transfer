@@ -2,6 +2,8 @@ import { createHmac, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import pg from "pg";
 import { directoryErrors } from "../i18n/directory-errors";
+import { confirmAction } from "./transfer-fixtures";
+import { t } from "../i18n";
 import { en } from "../i18n/en";
 
 test("admin can add staff, change a role, disable access and keep the last admin", async ({
@@ -36,6 +38,7 @@ test("admin can add staff, change a role, disable access and keep the last admin
     ]);
     await page.goto("/");
     await expect(page.getByText(phone)).toBeVisible();
+    await page.getByRole("button", { name: en.menuOpen }).click();
     await page.getByRole("link", { name: en.directory }).click();
     await page.getByText(en.staffAdd, { exact: true }).click();
     await page.getByLabel(en.name, { exact: true }).fill("Jordan");
@@ -43,21 +46,17 @@ test("admin can add staff, change a role, disable access and keep the last admin
     await page.getByRole("button", { name: en.staffAddMember }).click();
     const member = page.getByRole("listitem").filter({ hasText: "Jordan" });
     await expect(member).toContainText(newPhone);
-    page.on("dialog", (dialog) => dialog.accept());
-    await member.getByRole("button", { name: en.staffMakeAdmin }).click();
-    await expect(member).toContainText(`${en.admin} · ${en.staffActive}`);
-    await member.getByRole("button", { name: en.staffDisable }).click();
-    await expect(member).toContainText(`${en.admin} · ${en.staffDisabled}`);
-    await page
-      .getByRole("listitem")
-      .filter({ hasText: phone })
-      .getByRole("button", { name: en.staffMakeStaff })
-      .click();
+    await confirmAction(page, en.staffMakeAdmin, t("en", "staffConfirmMakeAdmin", { name: "Jordan" }), member);
+    await expect(member).toContainText(`${en.admin} · ${newPhone} · ${en.staffActive}`);
+    await confirmAction(page, en.staffDisable, t("en", "staffConfirmDisable", { name: "Jordan" }), member);
+    await expect(member).toContainText(`${en.admin} · ${newPhone} · ${en.staffDisabled}`);
+    const self = page.getByRole("listitem").filter({ hasText: phone });
+    await confirmAction(page, en.staffMakeStaff, t("en", "staffConfirmMakeStaff", { name: "Avery" }), self);
     await expect(page.getByRole("status")).toHaveText(directoryErrors.DIRECTORY_LAST_ACTIVE_ADMIN.en);
     await page.reload();
     await expect(member).toContainText(en.staffDisabled);
-    await member.getByRole("button", { name: en.staffEnable, exact: true }).click();
-    await expect(member).toContainText(`${en.admin} · ${en.staffActive}`);
+    await confirmAction(page, en.staffEnable, t("en", "staffConfirmEnable", { name: "Jordan" }), member);
+    await expect(member).toContainText(`${en.admin} · ${newPhone} · ${en.staffActive}`);
     await page.reload();
     await expect(member.getByRole("button", { name: en.staffDisable, exact: true })).toBeVisible();
   } finally {

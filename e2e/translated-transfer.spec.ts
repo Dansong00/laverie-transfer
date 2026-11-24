@@ -23,6 +23,7 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await page.goto("/");
     await page.getByLabel(t("en", "language")).selectOption("es");
     await page.getByRole("button", { name: t("en", "saveLanguage") }).click();
+    await page.getByRole("button", { name: t("es", "menuOpen") }).click();
     await page.getByRole("link", { name: t("es", "directory") }).click();
     await expect(page.getByRole("heading", { name: t("es", "directory"), exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Sam", exact: true })).toBeVisible();

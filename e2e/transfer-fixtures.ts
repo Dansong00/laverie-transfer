@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { expect, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type pg from "pg";
 
 export async function signIn(client: BrowserContext, pool: pg.Pool, ids: string[], phone: string) {
@@ -44,8 +44,8 @@ export async function cleanTransfers(pool: pg.Pool, ids: string[], tickets: stri
   await pool.end();
 }
 
-export async function confirmAction(page: Page, label: string, prompt?: string) {
-  await page.getByRole("button", { name: label, exact: true }).click();
+export async function confirmAction(page: Page, label: string, prompt?: string, scope: Page | Locator = page) {
+  await scope.getByRole("button", { name: label, exact: true }).click();
   const sheet = page.getByRole("dialog", { name: label, exact: true });
   if (prompt) await expect(sheet.locator("p")).toHaveText(prompt);
   await sheet.getByRole("button", { name: label, exact: true }).click();

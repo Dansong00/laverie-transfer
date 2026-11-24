@@ -10,7 +10,7 @@ function TimedToast({ message, detail }: Props) {
     const timer = setTimeout(() => setVisible(false), 4000);
     return () => clearTimeout(timer);
   }, []);
-  return visible ? <div className="toast" role="status"><span>{message}</span>{detail && <> <span>{detail}</span></>}</div> : null;
+  return visible ? <p className="toast" role="status" aria-live="polite"><span>{message}</span>{detail && <> <span>{detail}</span></>}</p> : null;
 }
 
 export function Toast({ message, detail }: Props) {

@@ -18,7 +18,6 @@
 .switch a[aria-current=page] { background: hsl(var(--store-switch-on, var(--foreground))); color: hsl(var(--store-switch-on-fg, var(--background))); }
 .sign-in .primary { font-family: var(--font-cta); }
 .sign-in a.link { text-decoration: none; }
-.profile-page > a.link { display: flex; align-items: center; }
 dialog.sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: 100%; max-width: 430px;
   max-height: 88dvh; overflow-y: auto; border: 0;
   padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
@@ -102,3 +101,17 @@ a.order-row, button.order-row { grid-template-columns: auto minmax(0,1fr) max-co
 .orders-screen .confirm-contents { margin-block: 8px; }
 .orders-screen .btn:disabled { background: hsl(var(--secondary)); border-color: hsl(var(--border)); color: hsl(var(--muted-foreground)); }
 .remove-toggle input { width: 18px; height: 18px; }
+
+.profile-card dd, .staff-summary { min-width: 0; overflow-wrap: anywhere; }
+.profile-card .input, .add-fields .input { min-height: 52px; }
+.profile-card .btn { margin-top: 12px; }
+.chrome-sticky:has(.menu-btn[aria-expanded=true]) + .profile-page .profile-signout { visibility: hidden; }
+.staff-list { margin: 12px 0; padding: 0; list-style: none; }
+.staff-row-admin { grid-template-columns: minmax(0, 1fr) auto; }
+.staff-name { margin: 0; font-size: 16px; }
+.staff-meta { margin: 4px 0 0; }
+.staff-summary.inactive { opacity: .55; }
+.staff-actions .btn { min-width: 0; }
+.add-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sheet .field-error { color: hsl(var(--destructive)); }
+.btn.btn-destructive { background: hsl(var(--destructive)); color: white; }
