@@ -13,10 +13,13 @@ export default function Home() {
 
 async function StaffAccess() {
   const actor = await requestProfile();
-  if (!actor) return <main className="sign-in">
-    <Image className="wordmark" src="/brand/laverie.webp" alt="Laverie" width={1500} height={428} priority />
-    <SignIn />
-  </main>;
+  if (!actor) return <>
+    <div className="brand-bar" />
+    <main className="e2e auth">
+      <Image className="wordmark" src="/brand/laverie.webp" alt="Laverie" width={1500} height={428} priority />
+      <SignIn />
+    </main>
+  </>;
   const locale = await requestLocale();
   return <>
     <AppHeader actor={actor} locale={locale} />
