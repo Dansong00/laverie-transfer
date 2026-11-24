@@ -1,0 +1,44 @@
+/* Route-specific rules retire as their corresponding screens are ported. */
+@import "./existing-screens.css";
+
+.app-shell { width: 100%; max-width: 560px; min-height: 100dvh; margin-inline: auto; }
+@media (min-width: 600px) { .app-shell { border-inline: 1px solid hsl(var(--border)); } }
+.sr-only { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset: 2px; }
+.who-menu, .who { min-width: 0; }
+.menu-btn[aria-expanded=true] { position: relative; z-index: 32; }
+.account-menu button.is-danger {
+  width: 100%; min-height: 44px; border: 0; padding: 8px 16px; text-align: start;
+  font: inherit; font-size: 14px; font-weight: 600; background: transparent; color: hsl(var(--destructive));
+}
+.account-menu button.is-danger:hover { background: hsl(var(--muted)); }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.row-meta { min-width: 0; overflow-wrap: anywhere; color: hsl(var(--muted-foreground)); }
+.op-id { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.switch a[aria-current=page] { background: hsl(var(--store-switch-on, var(--foreground))); color: hsl(var(--store-switch-on-fg, var(--background))); }
+.eligible-orders > nav { top: 60px; }
+.sign-in .primary { font-family: var(--font-cta); }
+.sign-in a.link { text-decoration: none; }
+.profile-page > a.link { display: flex; align-items: center; }
+dialog.sheet { position: fixed; inset: auto 0 0 0; margin: 0 auto; width: 100%; max-width: 430px;
+  max-height: 88dvh; overflow-y: auto; border: 0;
+  padding: 16px 16px calc(28px + env(safe-area-inset-bottom)); }
+dialog.sheet::backdrop { background: hsl(var(--foreground) / .4); }
+
+.order-row { grid-template-columns: auto minmax(0,1fr) max-content; }
+a.order-row, button.order-row { grid-template-columns: auto minmax(0,1fr) max-content 16px; width: 100%; text-align: left; }
+.order-row.selectable { grid-template-columns: 18px auto minmax(0,1fr) max-content; position: relative; }
+
+.btn, a.btn { white-space: normal; text-align: center; text-wrap: balance;
+  padding-block: 10px; line-height: 1.2; min-height: 48px; }
+.flow-title, .sheet h2 { overflow-wrap: break-word; text-wrap: balance; }
+.back-btn { max-width: 100%; }
+.back-btn > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.e2e-page .toast { white-space: normal; text-wrap: pretty; }
+.who strong { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anomaly, .count-chip { white-space: normal; }
+.batch-id { white-space: nowrap; }
+.view-option, .account-menu a { min-height: 44px; line-height: 1.25; padding-block: 8px; }
+.staff-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.staff-actions .btn { font-size: 12px; min-height: 44px; padding-inline: 10px; }
+.banner, .field-error, .btn-hint, .locked-note { overflow-wrap: break-word; }

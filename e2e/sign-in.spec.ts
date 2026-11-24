@@ -26,7 +26,7 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     const cookie = (await context.cookies()).find(c => c.name === "laverie_session");
     expect(cookie).toMatchObject({ secure: true, httpOnly: true, sameSite: "Lax" });
     await page.reload();
-    await expect(page.getByText("Taylor")).toBeVisible();
+    await expect(page.getByText("Taylor", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: en.directory })).toHaveCount(0);
     await expect(page.getByText(phone)).toHaveCount(0);
     expect((await page.request.get("/api/staff")).status()).toBe(403);
@@ -49,7 +49,8 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await expect(page.getByRole("link", { name: "East Village" })).toHaveAttribute("aria-current", "page");
     await expect(page.getByText("#E2E-S7-EV")).toBeVisible();
     await expect(page.getByText("#E2E-S7-SO")).toHaveCount(0);
-    await page.getByRole("link", { name: en.staffHome }).click();
+    await page.getByRole("button", { name: en.menuOpen }).click();
+    await page.getByRole("link", { name: en.profile, exact: true }).click();
     await page.getByRole("button", { name: en.signOut }).click();
     await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
     expect((await page.request.get("/api/session")).status()).toBe(401);

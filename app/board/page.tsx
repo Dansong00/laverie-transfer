@@ -1,3 +1,4 @@
+import { AppHeader } from "../ui/app-header";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -11,9 +12,6 @@ import { getStaffPreferences } from "../../staff/preferences";
 import { getBatch, listBatchesForStore, type BoardCard, type Section } from "../../transfer/board";
 import { BoardChanges, CorrectionForm, StoreButton } from "./store-actions";
 import { BoardRefresh, SectionFilter } from "./controls";
-import "../sign-in.css";
-import "../orders/orders.css";
-import "./board.css";
 
 function sectionLabel(locale: Locale, section: Section) {
   switch (section) {
@@ -61,27 +59,29 @@ async function Board({ searchParams, locale }: PageProps<"/board"> & { locale: L
   if (query.batch && typeof query.batch !== "string") notFound();
   const base = "/board?store=" + store;
   return (
-    <main className="eligible-orders transfer-board">
-      <BoardRefresh />
-      <Link href="/">{t(locale, "staffHome")}</Link>
-      <h1>{t(locale, "board")}</h1>
-      <nav aria-label={t(locale, "store")}>
-        {Object.entries(stores).map(([id, name]) => (
-          <Link key={id} href={"/board?store=" + id} aria-current={store === id ? "page" : undefined}>
-            {name}
-          </Link>
-        ))}
-      </nav>
-      {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
-      <BoardChanges locale={locale} key={actor.staffId + store} staffId={actor.staffId} store={store}>
-        {query.batch ? (
-          <BatchDetail locale={locale} id={query.batch} store={store} admin={actor.role === "admin"} />
-        ) : (
-          <Sections locale={locale} store={store} staffId={actor.staffId} />
-        )}
-      </BoardChanges>
-      {query.batch && <Link href={base}>{t(locale, "boardBackToStore", { store: stores[store] })}</Link>}
-    </main>
+    <>
+      <AppHeader actor={actor} locale={locale} store={store} />
+      <main className="eligible-orders transfer-board">
+        <BoardRefresh />
+        <h1>{t(locale, "board")}</h1>
+        <nav aria-label={t(locale, "store")}>
+          {Object.entries(stores).map(([id, name]) => (
+            <Link key={id} href={"/board?store=" + id} aria-current={store === id ? "page" : undefined}>
+              {name}
+            </Link>
+          ))}
+        </nav>
+        {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
+        <BoardChanges locale={locale} key={actor.staffId + store} staffId={actor.staffId} store={store}>
+          {query.batch ? (
+            <BatchDetail locale={locale} id={query.batch} store={store} admin={actor.role === "admin"} />
+          ) : (
+            <Sections locale={locale} store={store} staffId={actor.staffId} />
+          )}
+        </BoardChanges>
+        {query.batch && <Link href={base}>{t(locale, "boardBackToStore", { store: stores[store] })}</Link>}
+      </main>
+    </>
   );
 }
 
