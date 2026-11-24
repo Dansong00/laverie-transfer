@@ -167,6 +167,14 @@ test("staff can recover a saved plan after a lost response, edit it and release 
     await expect(page.getByText(en.alreadySaved, { exact: true })).toBeVisible();
     await expect(page.getByText(t("en", "ordersConfirmedEmpty", { name: "Robin" }))).toBeVisible();
     await expect(page.getByRole("button", { name: en.ordersConfirmContents })).toHaveCount(0);
+    await page.goto("/board?store=east_village&batch=" + sentBatch);
+    await expect(page.getByRole("button", { name: en.boardBackToSent })).toHaveCount(0);
+    await pool.query("update staff set role='admin' where id=$1", [staff]);
+    await page.reload();
+    await page.getByRole("button", { name: en.boardBackToSent }).click({ timeout: 5000 });
+    await page.getByLabel(en.boardCorrectionReason).fill("Receipt recorded for the wrong trip");
+    await page.getByRole("button", { name: en.boardSaveCorrection }).click();
+    await expect(page.getByText("Receipt recorded for the wrong trip", { exact: false })).toBeVisible();
   } finally {
     await pool.query("delete from handoffs where staff_id=$1", [staff]);
     await pool.query(

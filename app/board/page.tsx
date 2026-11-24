@@ -181,7 +181,7 @@ async function BatchDetail({ id, store, admin, locale }: {
           <small className="op-id">{t(locale, "operationIdLabel", { id: c.operationId })}</small>
         </div>)}
       </section>}
-      {section && <div className="btn-row">
+      {(section || canCorrectTravel) && <div className="btn-row">
         {section === "planned" && store === origin && <Link className="btn" href={`/orders?store=${store}&batch=${encodeURIComponent(id)}`}>{t(locale, "boardEditPlan")}</Link>}
         {atDestination && section === "arriving" && <StoreButton label={t(locale, "boardReceive")} command={{ ...command, action: "receive" }} />}
         {atDestination && waiting.length > 1 && <StoreButton label={t(locale, "boardStartProcessingMany", { count: waiting.length })} command={{ ...command, action: "startProcessing", orderKeys: waiting }} />}
