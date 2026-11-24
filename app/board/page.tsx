@@ -9,7 +9,7 @@ import { stores, type StoreId } from "../../db/eligible-orders";
 import { boardSections } from "../../db/schema";
 import { requestLocale, requestProfile } from "../../staff/request-profile";
 import { getStaffPreferences } from "../../staff/preferences";
-import { getBatch, listBatchesForStore, type BoardCard, type Section } from "../../transfer/board";
+import { getBatch, listBatchesForStore, type Section } from "../../transfer/board";
 import { BoardChanges, CorrectionForm, StoreButton } from "./store-actions";
 import { BoardRefresh, SectionFilter } from "./controls";
 
@@ -24,21 +24,6 @@ function sectionLabel(locale: Locale, section: Section) {
     default:
       return phaseLabel(locale, section);
   }
-}
-
-function cardSummary(locale: Locale, card: BoardCard) {
-  if (card.section === "recently_returned") {
-    return t(locale, "boardReturnedCount", { count: card.phaseCounts.returned, total: card.total });
-  }
-  if (card.section === "planned" && card.total === 0) return t(locale, "emptyPlan");
-  if (
-    (card.section === "received" && card.ready > 0) ||
-    card.section === "processing" ||
-    card.section === "ready_for_return"
-  ) {
-    return t(locale, "boardReadyCount", { count: card.ready, total: card.total });
-  }
-  return t(locale, card.total === 1 ? "boardOneOrder" : "boardManyOrders", { count: card.total });
 }
 
 export default async function BoardPage(props: PageProps<"/board">) {
@@ -61,16 +46,16 @@ async function Board({ searchParams, locale }: PageProps<"/board"> & { locale: L
   return (
     <>
       <AppHeader actor={actor} locale={locale} store={store} />
-      <main className="eligible-orders transfer-board">
+      <main className={query.batch ? "eligible-orders transfer-board" : store === "soho" ? "board-list store-soho" : "board-list store-ev"}>
         <BoardRefresh />
-        <h1>{t(locale, "board")}</h1>
-        <nav aria-label={t(locale, "store")}>
+        <h1 className={query.batch ? undefined : "sr-only"}>{t(locale, "board")}</h1>
+        {query.batch && <nav aria-label={t(locale, "store")}>
           {Object.entries(stores).map(([id, name]) => (
             <Link key={id} href={"/board?store=" + id} aria-current={store === id ? "page" : undefined}>
               {name}
             </Link>
           ))}
-        </nav>
+        </nav>}
         {query.saved === "again" && <p role="status">{t(locale, "alreadySaved")}</p>}
         <BoardChanges locale={locale} key={actor.staffId + store} staffId={actor.staffId} store={store}>
           {query.batch ? (
@@ -85,59 +70,51 @@ async function Board({ searchParams, locale }: PageProps<"/board"> & { locale: L
   );
 }
 
-async function Sections({ store, staffId, locale }: { store: StoreId; staffId: string; locale: Locale }) {
+async function boardSnapshot(store: StoreId, staffId: string) {
   const [cards, visible] = await Promise.all([listBatchesForStore(store), getStaffPreferences(staffId)]);
-  return (
-    <>
-      <div className="board-tools">
-        <Link className="create" href={"/orders?store=" + store}>
-          {t(locale, "boardCreateTransfer")}
-        </Link>
-        <SectionFilter
-          key={visible.join(",")}
-          locale={locale}
-          visible={visible}
-          choices={boardSections.map((id) => ({ id, name: sectionLabel(locale, id) }))}
-        />
-      </div>
-      {!visible.length && <p>{t(locale, "boardHiddenSections")}</p>}
-      {visible.map((section) => {
-        const items = cards.filter((card) => card.section === section);
-        const label = sectionLabel(locale, section);
-        return (
-          <section key={section} aria-label={label}>
-            <h2>{label}</h2>
-            {items.length ? (
-              <ul>
-                {items.map((card) => (
-                  <li key={card.id}>
-                    <Link href={`/board?store=${store}&batch=${encodeURIComponent(card.id)}`}>{card.id}</Link>
-                    <span>{cardSummary(locale, card)}</span>
-                    {section === "arriving" && (
-                      <StoreButton
-                        label={t(locale, "boardReceive")}
-                        command={{
-                          kind: "runAction",
-                          action: "receive",
-                          origin: card.origin as StoreId,
-                          store,
-                          batchId: card.id,
-                          expectedVersion: card.version,
-                        }}
-                      />
-                    )}
-                    {card.contentsChanged && <small>{t(locale, "contentsChanged")}</small>}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>{t(locale, "boardNoBatches")}</p>
-            )}
-          </section>
-        );
+  return { cards, visible, updatedAt: Date.now() };
+}
+
+async function Sections({ store, staffId, locale }: { store: StoreId; staffId: string; locale: Locale }) {
+  const { cards, visible, updatedAt } = await boardSnapshot(store, staffId);
+  const groups = boardSections.map(id => {
+    const items = cards.filter(card => card.section === id);
+    const content = items.length ? <ul className="board-batches">
+      {items.map(card => {
+        const metaId = "meta-" + card.id;
+        return <li key={card.id}>
+          <Link className="batch-row" aria-label={card.id} aria-describedby={metaId}
+            href={`/board?store=${store}&batch=${encodeURIComponent(card.id)}`}>
+            <span className="batch-id">{card.id}</span>
+            {card.ready > 0 && card.ready < card.total && <span className="badges"><span className="count-chip">
+              {t(locale, "boardReadyCount", { count: card.ready, total: card.total })}
+            </span></span>}
+            <span className="batch-meta" id={metaId}>
+              {stores[card.origin as StoreId]} → {stores[card.destination as StoreId]} · {t(locale, card.total === 1 ? "boardOneOrder" : "boardManyOrders", { count: card.total })}
+              {id === "recently_returned" && <> · <span>{t(locale, "boardReturnedCount", { count: card.phaseCounts.returned, total: card.total })}</span></>}
+              {id === "planned" && !card.total && <> · {t(locale, "emptyPlan")}</>}
+              {card.contentsChanged && <> · <span className="anomaly">{t(locale, "contentsChanged")}</span></>}
+            </span>
+          </Link>
+          {id === "arriving" && <div className="row-actions">
+            <StoreButton sheet label={t(locale, "boardReceive")}
+              command={{
+                kind: "runAction",
+                action: "receive",
+                origin: card.origin as StoreId,
+                store,
+                batchId: card.id,
+                expectedVersion: card.version,
+              }}
+            />
+          </div>}
+        </li>;
       })}
-    </>
-  );
+    </ul> : <p className="empty-group">{t(locale, "boardNoBatches")}</p>;
+    return { id, name: sectionLabel(locale, id), content };
+  });
+  return <SectionFilter groups={groups} visible={visible} staffId={staffId}
+    store={store} names={stores} locale={locale} updatedAt={updatedAt} />;
 }
 
 async function BatchDetail({ id, store, admin, locale }: {

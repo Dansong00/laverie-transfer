@@ -146,8 +146,10 @@ test("staff can recover a saved plan after a lost response, edit it and release 
       .getByRole("region", { name: en.boardArriving })
       .getByRole("listitem")
       .filter({ has: page.getByRole("link", { name: sentBatch, exact: true }) });
-    page.once("dialog", (d) => d.accept());
     await arriving.getByRole("button", { name: en.boardReceive }).click();
+    const receipt = page.getByRole("dialog", { name: en.boardReceive });
+    await expect(receipt.locator("p")).toHaveText(t("en", "boardConfirmAction", { action: en.boardReceive, id: sentBatch }));
+    await receipt.getByRole("button", { name: en.boardReceive }).click();
     await expect(
       page.getByText(`${en.phaseReceived} · ${t("en", "boardReadyCount", { count: 0, total: 0 })}`),
     ).toBeVisible();

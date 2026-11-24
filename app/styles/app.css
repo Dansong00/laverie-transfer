@@ -2,9 +2,9 @@
 @import "./existing-screens.css";
 
 .app-shell { width: 100%; max-width: 560px; min-height: 100dvh; margin-inline: auto; }
-@media (min-width: 600px) { .app-shell { border-inline: 1px solid hsl(var(--border)); } }
+@media (min-width: 600px) { .app-shell { box-shadow: 0 0 0 1px hsl(var(--border)); } }
 .sr-only { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
-:focus-visible { outline: 2px solid hsl(var(--foreground)); outline-offset: 2px; }
+:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .who-menu, .who { min-width: 0; }
 .menu-btn[aria-expanded=true] { position: relative; z-index: 32; }
 .account-menu button.is-danger {
@@ -42,3 +42,19 @@ a.order-row, button.order-row { grid-template-columns: auto minmax(0,1fr) max-co
 .staff-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .staff-actions .btn { font-size: 12px; min-height: 44px; padding-inline: 10px; }
 .banner, .field-error, .btn-hint, .locked-note { overflow-wrap: break-word; }
+
+.board-list .store-bar { position: sticky; top: 60px; z-index: 7; }
+.board-list .switch { padding-block: 0; }
+.board-list .switch a { border-block: 3px solid transparent; background-clip: padding-box; }
+.board-list .group-label { margin: 0; }
+.board-list .e2e-body { padding-top: 16px; }
+.board-list .cta-row { margin-top: 0; }
+.board-list .filter-btn { cursor: pointer; list-style: none; }
+.board-list .filter-btn::-webkit-details-marker { display: none; }
+.board-list details[open] .filter-btn { border-color: hsl(var(--store-ink)); }
+.board-list .view-panel-drop { max-height: calc(100dvh - 190px); overflow-y: auto; }
+.board-list fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.board-batches { list-style: none; margin: 0; padding: 0; }
+.board-batches li + li { border-top: 1px solid hsl(var(--border)); }
+.board-batches .batch-row { border-top: 0; }
+.board-batches .row-actions { padding: 0 14px 12px; }
