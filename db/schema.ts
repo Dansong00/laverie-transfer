@@ -108,7 +108,8 @@ export const sessions = pgTable("sessions", {
 export const otpCodes = pgTable("otp_codes", {
   id: uuid("id").primaryKey().defaultRandom(),
   phone: text("phone").notNull(),
-  codeHash: text("code_hash").notNull(),
+  codeHash: text("code_hash"),
+  verificationSid: text("verification_sid"),
   createdAt: timestamp("created_at", tz).notNull(),
   expiresAt: timestamp("expires_at", tz).notNull(),
   consumedAt: timestamp("consumed_at", tz),

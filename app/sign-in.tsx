@@ -46,10 +46,12 @@ export function SignIn() {
           setMessage(result.error);
           return;
         }
-        setEnterCode(true);
         setSeconds(result.retrySeconds);
-        if (result.limited) setMessage("Please wait before requesting another code.");
-        else {
+        if (result.limited) {
+          listener.current?.abort();
+          setMessage("Please wait before requesting another code.");
+        } else {
+          setEnterCode(true);
           setMessage("If this number belongs to active staff, a code is on its way.");
         }
       } catch {
