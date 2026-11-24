@@ -32,3 +32,10 @@ Pending staff review for batch detail and corrections
 - {order} está en «{from}». Esto lo mueve una fase, a «{to}». El motivo es obligatorio y quedará en el historial.
 - Todavía no
 - Tablero de {store}
+
+Pending staff review for transfer planning
+
+- No hay pedidos de {store} seleccionados
+- 1 pedido de {store} seleccionado
+- {count} pedidos de {store} seleccionados
+- ¿Guardar los cambios del lote {batch}?

@@ -4,7 +4,7 @@ import pg from "pg";
 import { batchErrors } from "../i18n/batch-errors";
 import { directoryErrors } from "../i18n/directory-errors";
 import { t } from "../i18n";
-import { cleanTransfers, signIn } from "./transfer-fixtures";
+import { cleanTransfers, confirmAction, signIn } from "./transfer-fixtures";
 
 test("Spanish staff screens preserve store, customer, ticket and handoff details", async ({ page, context }) => {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -42,7 +42,7 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await expect(page.getByRole("status")).toHaveText(directoryErrors.DIRECTORY_PHONE_ALREADY_REGISTERED.es);
 
     await page.goto("/orders?store=soho");
-    await expect(page.getByRole("heading", { name: t("es", "orders"), exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: t("es", "boardCreateTransfer"), exact: true })).toBeVisible();
     for (const store of ["SoHo", "East Village"]) {
       await expect(page.getByRole("link", { name: store, exact: true })).toBeVisible();
     }
@@ -57,14 +57,8 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await pool.query("update cents_orders set status='SUBMITTED' where store_id='soho' and order_number=$1", [ticket]);
     await page.getByRole("button", { name: t("es", "ordersCreatePlan") }).click();
     const batch = await page.getByRole("heading", { name: /^SOHO-B/ }).innerText();
-    const prompts: string[] = [];
-    page.on("dialog", async dialog => {
-      prompts.push(dialog.message());
-      await dialog.accept();
-    });
-    await page.getByRole("button", { name: t("es", "ordersMarkSent") }).click();
+    await confirmAction(page, t("es", "ordersMarkSent"), t("es", "ordersConfirmSendOne", { batch }));
     await expect(page.getByText(t("es", "ordersSentStatus", { batch }))).toBeVisible();
-    expect(prompts).toEqual([t("es", "ordersConfirmSendOne", { batch })]);
 
     await page.goto("/board?store=east_village");
     await expect(page.getByRole("heading", { name: t("es", "board"), exact: true })).toBeVisible();
@@ -83,7 +77,7 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
     await page.getByLabel(t("es", "didNotTravel")).check();
     const reason = "Driver kept ticket {batch} at SoHo";
     await page.getByLabel(t("es", "ordersReasonFor", { number: ticket })).fill(reason);
-    await page.getByRole("button", { name: t("es", "ordersRecordCorrection") }).click();
+    await confirmAction(page, t("es", "ordersRecordCorrection"), t("es", "ordersConfirmMissing"));
     await expect(page.getByRole("heading", { name: t("es", "ordersRemoved"), exact: true })).toBeVisible();
     await expect(page.getByText(reason, { exact: false }).first()).toBeVisible();
   } finally {

@@ -5,7 +5,7 @@ import type { StoreId } from "../../db/eligible-orders";
 import { formatLocalDate } from "../../i18n/dates";
 import { t, type Locale } from "../../i18n";
 import { phaseLabel } from "../../i18n/transfer";
-import type { BatchChange } from "../../transfer/commands";
+import type { OrderConfirmation } from "./planner";
 import type { contentsHistory } from "../../transfer/contents";
 
 export type SentTrip = Awaited<ReturnType<typeof contentsHistory>> & {
@@ -31,17 +31,18 @@ export function ContentsForm({
   store,
   admin,
   disabled,
-  submit,
+  confirm,
 }: {
   locale: Locale;
   trip: SentTrip;
   store: StoreId;
   admin: boolean;
   disabled: boolean;
-  submit: (change: BatchChange) => void;
+  confirm: (confirmation: OrderConfirmation) => void;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const remaining = trip.members.filter((m) => !m.removedAt);
+  const removed = trip.members.filter(m => m.removedAt);
   const canCorrect =
     remaining.length > 0 &&
     remaining.every(
@@ -51,113 +52,128 @@ export function ContentsForm({
   function correct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    if (!selected.length || !window.confirm(t(locale, "ordersConfirmMissing"))) return;
-    submit({
-      ...command,
-      kind: "correctSentMembership",
-      remove: selected.map((orderNumber) => ({
-        orderKey: { storeId: trip.origin, orderNumber },
-        reason: String(data.get("reason-" + orderNumber) ?? ""),
-      })),
+    if (!selected.length) return;
+    confirm({
+      title: t(locale, "ordersRecordCorrection"), prompt: t(locale, "ordersConfirmMissing"),
+      change: {
+        ...command, kind: "correctSentMembership",
+        remove: selected.map(orderNumber => ({
+          orderKey: { storeId: trip.origin, orderNumber }, reason: String(data.get("reason-" + orderNumber) ?? ""),
+        })),
+      },
     });
   }
   return (
     <section>
-      <h2>{trip.id}</h2>
-      {trip.changed && <p role="status">{t(locale, "contentsChanged")}</p>}
-      <h3>{t(locale, "ordersRemaining")}</h3>
-      {!remaining.length && <p>{t(locale, "ordersNoneRemaining")}</p>}
+      {trip.changed && <p className="banner banner-warn" role="status">{t(locale, "contentsChanged")}</p>}
       <form onSubmit={correct}>
         <fieldset disabled={disabled}>
-          <ul>
-            {remaining.map((m) => (
-              <li key={m.number}>
-                <strong>#{m.number}</strong> {phaseLabel(locale, m.phase)}
-                {admin && canCorrect && (
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(m.number)}
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked ? [...selected, m.number] : selected.filter((n) => n !== m.number),
-                        )
-                      }
-                    />{" "}
-                    {t(locale, "didNotTravel")}
-                  </label>
-                )}
-                {selected.includes(m.number) && (
-                  <label>
-                    {t(locale, "ordersReasonFor", { number: m.number })}
-                    <input name={"reason-" + m.number} required />
-                  </label>
-                )}
-              </li>
-            ))}
-          </ul>
+          <section className="card orders-card">
+            <h2 className="group-label">{t(locale, "ordersRemaining")}</h2>
+            {!remaining.length && <p className="empty-group">{t(locale, "ordersNoneRemaining")}</p>}
+            <ul>
+              {remaining.map((m) => (
+                <li key={m.number}>
+                  <div className="order-row member-row"><strong className="onum">#{m.number}</strong> <span>{phaseLabel(locale, m.phase)}</span>
+                    {admin && canCorrect && (
+                      <label className="remove-toggle">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(m.number)}
+                          onChange={(e) =>
+                            setSelected(
+                              e.target.checked ? [...selected, m.number] : selected.filter((n) => n !== m.number),
+                            )
+                          }
+                        />{" "}
+                        {t(locale, "didNotTravel")}
+                      </label>
+                    )}
+                  </div>
+                  {selected.includes(m.number) && (
+                    <label className="removal-note">
+                      {t(locale, "ordersReasonFor", { number: m.number })}
+                      <input name={"reason-" + m.number} required />
+                    </label>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
           {admin && canCorrect && (
-            <button disabled={!selected.length}>{t(locale, "ordersRecordCorrection")}</button>
+            <button className="btn btn-outline btn-danger" disabled={!selected.length}>{t(locale, "ordersRecordCorrection")}</button>
           )}
         </fieldset>
       </form>
       {trip.changed && !trip.received && (
-        <p>{t(locale, "ordersReceiveBeforeConfirm")}</p>
+        <p className="btn-hint">{t(locale, "ordersReceiveBeforeConfirm")}</p>
       )}
       {trip.changed && trip.received && !remaining.some((m) => m.phase === "sent") && (
-        <button
+        <button className="btn confirm-contents"
           disabled={disabled || selected.length > 0}
           onClick={() => {
             const prompt = t(locale, "ordersConfirmRemaining", {
               batch: trip.id,
               store: store === "soho" ? "SoHo" : "East Village",
             });
-            if (window.confirm(prompt)) submit({ ...command, kind: "confirmContents", store });
+            confirm({
+              title: t(locale, "ordersConfirmContents"), prompt,
+              change: { ...command, kind: "confirmContents", store },
+              details: <dl className="contents-diff">
+                <dt>{t(locale, "ordersRemaining")}</dt>
+                <dd>{remaining.length ? remaining.map(m => "#" + m.number).join(", ") : t(locale, "ordersNoneRemaining")}</dd>
+                {removed.length > 0 && <><dt>{t(locale, "ordersRemoved")}</dt>
+                  <dd><del>{removed.map(m => "#" + m.number).join(", ")}</del></dd></>}
+              </dl>,
+            });
           }}
         >
           {t(locale, "ordersConfirmContents")}
         </button>
       )}
-      {trip.members.some((m) => m.removedAt) && (
-        <>
-          <h3>{t(locale, "ordersRemoved")}</h3>
+      {removed.length > 0 && (
+        <section className="card orders-card">
+          <h2 className="group-label">{t(locale, "ordersRemoved")}</h2>
           <ul>
-            {trip.members
-              .filter((m) => m.removedAt)
-              .map((m) => (
-                <li key={m.number + String(m.removedAt)}>
-                  #{m.number} ·{" "}
-                  {t(locale,
-                    m.removalKind === "correctSentMembership" ? "didNotTravel" : "ordersRemovedBeforeDeparture",
-                  )}
-                  {" · "}{m.reason} · {m.removedBy} · <HistoryTime locale={locale} at={m.removedAt!} />
-                </li>
-              ))}
+            {removed.map((m) => (
+              <li className="history-entry" key={m.number + String(m.removedAt)}>
+                <del className="onum">#{m.number}</del> ·{" "}
+                {t(locale,
+                  m.removalKind === "correctSentMembership" ? "didNotTravel" : "ordersRemovedBeforeDeparture",
+                )}
+                {" · "}{m.reason} · {m.removedBy} · <HistoryTime locale={locale} at={m.removedAt!} />
+              </li>
+            ))}
           </ul>
-        </>
+        </section>
       )}
-      <h3>{t(locale, "handoffHistory")}</h3>
-      <ul>
-        {trip.custody.map((h) => (
-          <li key={h.id}>
-            #{h.number} ·{" "}
-            {h.action === "correctSentMembership"
-              ? t(locale, "ordersDepartureCorrected")
-              : h.action === "send"
-                ? t(locale, "ordersMarkedSent")
-                : h.reason
-                  ? t(locale, "ordersMovedBack", { phase: phaseLabel(locale, h.toPhase), reason: h.reason })
-                  : phaseLabel(locale, h.toPhase)}{" "}
-            · {h.name} · <HistoryTime locale={locale} at={h.at} />
-          </li>
-        ))}
-      </ul>
+      <section className="card history-card">
+        <h2 className="group-label">{t(locale, "handoffHistory")}</h2>
+        <ol className="timeline">
+          {trip.custody.map((h) => (
+            <li className="step is-done" key={h.id}>
+              <span className="dot" aria-hidden="true" />
+              <div className="contents-step">
+                <strong className="onum">#{h.number}</strong> ·{" "}
+                {h.action === "correctSentMembership"
+                  ? t(locale, "ordersDepartureCorrected")
+                  : h.action === "send"
+                    ? t(locale, "ordersMarkedSent")
+                    : h.reason
+                      ? t(locale, "ordersMovedBack", { phase: phaseLabel(locale, h.toPhase), reason: h.reason })
+                      : phaseLabel(locale, h.toPhase)}{" "}
+                <span className="step-who">{h.name} · <HistoryTime locale={locale} at={h.at} /></span>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
       {trip.emptyCorrections.length > 0 && (
         <>
-          <h3>{t(locale, "emptyCorrections")}</h3>
+          <h2 className="group-label">{t(locale, "emptyCorrections")}</h2>
           <ul>
             {trip.emptyCorrections.map((c) => (
-              <li key={c.operationId}>
+              <li className="correction-callout" key={c.operationId}>
                 {phaseLabel(locale, c.fromPhase)} → {phaseLabel(locale, c.toPhase)} · {c.reason} · {c.staffName}
                 {" · "}<HistoryTime locale={locale} at={c.at} />
                 {" · "}{t(locale, "operationIdLabel", { id: c.operationId })}
@@ -168,10 +184,10 @@ export function ContentsForm({
       )}
       {trip.confirmations.length > 0 && (
         <>
-          <h3>{t(locale, "ordersContentsConfirmations")}</h3>
+          <h2 className="group-label">{t(locale, "ordersContentsConfirmations")}</h2>
           <ul>
             {trip.confirmations.map((c) => (
-              <li key={c.at}>
+              <li className="stamp" key={c.at}>
                 {c.orderKeys.length
                   ? t(locale, "ordersConfirmed", {
                       name: c.name,
