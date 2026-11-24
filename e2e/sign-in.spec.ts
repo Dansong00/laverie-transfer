@@ -63,3 +63,20 @@ test("staff can sign in from a text, refresh and sign out", async ({ page, conte
     await rm(inbox, { force: true });
   }
 });
+
+test("a limited first request stays on the mobile number step", async ({ page }) => {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const phone = "+12125550179";
+  try {
+    await pool.query("insert into otp_requests(phone,requested_at) values ($1, now())", [phone]);
+    await page.goto("/");
+    await page.getByLabel("Mobile number").fill(phone);
+    await page.getByRole("button", { name: "Send code" }).click();
+    await expect(page.getByRole("status")).toHaveText("Please wait before requesting another code.");
+    await expect(page.getByLabel("Mobile number")).toBeVisible();
+    await expect(page.getByLabel("One-time code")).toHaveCount(0);
+  } finally {
+    await pool.query("delete from otp_requests where phone=$1", [phone]);
+    await pool.end();
+  }
+});

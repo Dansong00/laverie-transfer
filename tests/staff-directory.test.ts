@@ -1,3 +1,4 @@
+import { verifyFixture } from "../e2e/verify-fixture.mjs";
 import { randomUUID } from "node:crypto";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
@@ -191,14 +192,11 @@ test("admins restore the same account, invalidate old credentials and replay a r
     .toEqual([{ disabled_at: null, phone: numbers[1] }]);
   expect((await pool.query("select id from otp_codes where phone=$1 and consumed_at is null", [numbers[1]])).rows)
     .toHaveLength(0);
-  vi.stubEnv("SMS_PROVIDER_API_KEY", "test");
-  vi.stubEnv("SMS_FROM", "+12125550170");
-  vi.stubEnv("APP_DOMAIN", "staff.example.test");
+  vi.stubEnv("TWILIO_VERIFY_SERVICE_SID", "test-service");
+  vi.stubEnv("TWILIO_ACCOUNT_SID", "test-account");
+  vi.stubEnv("TWILIO_AUTH_TOKEN", "test-token");
   let code = "";
-  const sms = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
-    code = JSON.parse(String(options?.body)).text.slice(-6);
-    return new Response(null, { status: 202 });
-  });
+  const sms = vi.spyOn(globalThis, "fetch").mockImplementation(verifyFixture(numbers[1], (value: string) => { code = value; }));
   try {
     const request = await requestSignInCode(numbers[1]);
     if (request.kind !== "accepted" || !request.deliver) throw new Error("Expected a fresh sign-in code");

@@ -1,3 +1,4 @@
+import { verifyFixture } from "../e2e/verify-fixture.mjs";
 import { setupStaffTestDatabase } from "./helpers/staff-database";
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { requestSignInCode, verifySignInCode } from "../staff/codes";
@@ -8,22 +9,16 @@ const pool = setupStaffTestDatabase();
 const phone = "+12125550171";
 const unknown = "+12125550172";
 let code = "";
-const sms = vi.fn(async (_url: string, options: RequestInit) => {
-  const body = JSON.parse(String(options.body));
-  expect(body.to).toBe(phone);
-  expect(body.text).toMatch(/\n@staff\.example\.test #[0-9]{6}$/);
-  code = body.text.slice(-6);
-  return new Response(null, { status: 202 });
-});
+const sms = vi.fn((value: string) => { code = value; });
 
 beforeEach(async () => {
   await pool.query("insert into staff(name,phone,role,created_at) values ('Test staff',$1,'staff',now())", [phone]);
   vi.stubEnv("SESSION_SECRET", "integration-test-only-secret-at-least-32-bytes");
-  vi.stubEnv("SMS_PROVIDER_API_KEY", "test");
-  vi.stubEnv("SMS_FROM", "+12125550170");
-  vi.stubEnv("APP_DOMAIN", "staff.example.test");
+  vi.stubEnv("TWILIO_VERIFY_SERVICE_SID", "test-service");
+  vi.stubEnv("TWILIO_ACCOUNT_SID", "test-account");
+  vi.stubEnv("TWILIO_AUTH_TOKEN", "test-token");
   vi.stubEnv("BOOTSTRAP_ADMIN_PHONE", unknown);
-  vi.stubGlobal("fetch", sms);
+  vi.stubGlobal("fetch", vi.fn(verifyFixture(phone, sms)));
   sms.mockClear();
   code = "";
 });
@@ -77,8 +72,9 @@ test("expired codes, replaced codes and a code locked by five wrong attempts are
 
 test("only one concurrent verification redeems a code and identity comes from current staff", async () => {
   await request();
-  const row = (await pool.query("select code_hash, expires_at-created_at as ttl from otp_codes")).rows[0];
-  expect(row.code_hash).not.toBe(code);
+  const row = (await pool.query("select verification_sid, code_hash, expires_at-created_at as ttl from otp_codes")).rows[0];
+  expect(row.code_hash).toBeNull();
+  expect(row.verification_sid).toMatch(/^VE/);
   expect(row.ttl.minutes).toBe(10);
   const issued = (await Promise.all([verifySignInCode(phone, code), verifySignInCode(phone, code)])).filter(s => s !== null);
   expect(issued).toHaveLength(1);
@@ -155,4 +151,80 @@ test("an exhausted client budget leaves a second client free to request and veri
   const { rows } = await pool.query("select action from otp_traffic");
   expect(JSON.stringify(rows)).not.toContain(first);
   expect(JSON.stringify(rows)).not.toContain(second);
+});
+
+test.each(["production", "preview"])("the test interceptor refuses to run in %s", env => {
+  const original = process.env.VERCEL_ENV;
+  vi.stubEnv("VERCEL_ENV", env);
+  try {
+    expect(() => verifyFixture(phone, sms)).toThrow(/restricted/);
+  } finally {
+    vi.stubEnv("VERCEL_ENV", original);
+  }
+});
+
+test("a delayed delivery rechecks eligibility, and an older callback cannot replace the current challenge", async () => {
+  const first = await requestSignInCode(phone);
+  if (first.kind !== "accepted" || !first.deliver) throw new Error("Expected delivery");
+  await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+  await request();
+  await first.deliver();
+  expect(sms).toHaveBeenCalledTimes(1);
+  await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+  const last = await requestSignInCode(phone);
+  if (last.kind !== "accepted" || !last.deliver) throw new Error("Expected delivery");
+  await pool.query("update staff set active=false where phone=$1", [phone]);
+  await last.deliver();
+  expect(sms).toHaveBeenCalledTimes(1);
+});
+
+test("replacement cancels the previous provider challenge", async () => {
+  await request();
+  const first = (await pool.query("select verification_sid from otp_codes")).rows[0].verification_sid;
+  await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+  await request();
+  const latest = (await pool.query("select verification_sid from otp_codes where consumed_at is null")).rows[0];
+  expect(latest.verification_sid).toBeTruthy();
+  expect(latest.verification_sid).not.toBe(first);
+});
+
+test("absent provider credentials cannot deliver or approve a code", async () => {
+  await request();
+  vi.stubEnv("TWILIO_AUTH_TOKEN", "");
+  await expect(verifySignInCode(phone, code)).rejects.toThrow(/configuration/);
+  await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    expect(await request()).toBe("accepted");
+    expect(sms).toHaveBeenCalledTimes(1);
+    expect(await verifySignInCode(phone, code)).toBeNull();
+    expect((await pool.query("select id from sessions")).rowCount).toBe(0);
+    expect(error).toHaveBeenCalledWith("Staff verification delivery failed");
+  } finally { error.mockRestore(); }
+});
+
+test("a provider start with a lost response cannot carry its code into a replacement", async () => {
+  const transport = verifyFixture(phone, sms);
+  vi.mocked(fetch).mockImplementationOnce(async (input, options) => {
+    await transport(input, options);
+    throw new Error("Response lost");
+  }).mockImplementation(transport);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await request();
+    expect(await verifySignInCode(phone, code)).toBeNull();
+    await pool.query("update otp_requests set requested_at=requested_at-interval '31 seconds'");
+    await request();
+    // First send, provider resend on the orphan, then fresh send after cancel.
+    expect(sms).toHaveBeenCalledTimes(3);
+    expect(await verifySignInCode(phone, code)).toBeTruthy();
+  } finally { log.mockRestore(); }
+});
+
+test("provider unavailability grants no session and does not count as a bad guess", async () => {
+  await request();
+  vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 503 }));
+  await expect(verifySignInCode(phone, code)).rejects.toThrow(/unavailable/);
+  expect((await pool.query("select * from otp_failures")).rowCount).toBe(0);
+  expect((await pool.query("select * from sessions")).rowCount).toBe(0);
 });

@@ -52,7 +52,7 @@ A healthy database looks like this:
 
 ## Staff sign-in
 
-Set `SESSION_SECRET` to a random secret of at least 32 bytes. Set `APP_DOMAIN` to the app hostname, `SMS_PROVIDER_API_KEY` to a Telnyx messaging API key, and `SMS_FROM` to its SMS-enabled sending number. Use environment-specific test credentials and numbers on preview.
+Set `SESSION_SECRET` to a random secret of at least 32 bytes. Configure `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_VERIFY_SERVICE_SID` on the server. Use a separate Verify service and test numbers on Preview. Configure SMS with six-digit codes and a ten-minute validity period. The app also enforces its ten-minute expiry and five-attempt limit locally. Twilio controls the SMS template. Manual entry works with the default message. Browser WebOTP autofill requires a domain-bound template configured in Verify for the deployment hostname.
 
 For first-time setup, set `BOOTSTRAP_ADMIN_PHONE` to the first admin’s E.164 number and run `pnpm staff:bootstrap` against the intended database. The command refuses if any admin already exists, including a disabled one.
 
@@ -175,6 +175,6 @@ This slice does not link the GitHub repo to Vercel or provision Neon. Those need
 1. Create a Neon project for this app. Keep production data on the production branch only.
 2. Give each Vercel preview its own database: the Neon–Vercel integration (a branch per preview) or a separate non-production database. Do not paste the production connection string into Preview.
 3. Import `Dansong00/laverie-transfer` into Vercel. Framework Next.js, package manager pnpm, Node.js 22. The repo already sets the install and build commands.
-4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or `SMS_PROVIDER_API_KEY`.
+4. Add the variables in `.env.example` for Preview and Production. Preview values are test-only. In particular, Preview must not reuse production `DATABASE_URL`, `SESSION_SECRET`, `CENTS_WEBHOOK_HEADER_SECRET`, `BOOTSTRAP_ADMIN_PHONE`, or Twilio credentials and Verify service.
 5. Deploy a preview. Open `/` and `/api/health`. Expect the sign-in form at `/` and `ok: true` with the hash of the latest migration listed in `drizzle/meta/_journal.json` at `/api/health`.
 6. Leave the Cents webhook unset until go-live, and never aim it at a preview.

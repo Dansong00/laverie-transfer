@@ -39,9 +39,9 @@ export default defineConfig({
       CENTS_WEBHOOK_HEADER_NAME: "X-Cents-Test",
       CENTS_WEBHOOK_HEADER_SECRET: "playwright-only",
       CENTS_STORE_ALLOWLIST: '{"soho":101,"east_village":102}',
-      APP_DOMAIN: "staff.example.test",
-      SMS_PROVIDER_API_KEY: "playwright-only",
-      SMS_FROM: "+12125550170",
+      TWILIO_VERIFY_SERVICE_SID: "test-service",
+      TWILIO_ACCOUNT_SID: "test-account",
+      TWILIO_AUTH_TOKEN: "test-token",
     },
   },
   projects: [

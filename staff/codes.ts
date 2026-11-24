@@ -1,12 +1,12 @@
-import { randomInt, randomUUID } from "node:crypto";
-import { and, count, desc, eq, gt, gte, isNull, lte, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, count, desc, eq, gt, gte, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "../db/client";
 import { otpCodes, otpFailures, otpRequests, otpTraffic, sessions, staff } from "../db/schema";
 import { getStaffLocale } from "./preferences";
 import { sessionToken } from "./session";
 import { normalizePhone, setting } from "./settings";
-import { matches, sign } from "./signature";
-import { sendCode } from "./sms";
+import { sign } from "./signature";
+import { cancelVerification, checkVerification, startVerification } from "./verify";
 
 type CodeRequest =
   | { kind: "invalid" }
@@ -49,6 +49,30 @@ async function recentFailures(tx: AuthTransaction, phone: string) {
   return row.total;
 }
 
+async function deliverVerification(phone: string, staffId: string, id: string) {
+  try {
+    await getDb().transaction(async tx => {
+      await tx.execute(lockPhone(phone));
+      const [person] = await tx.select({ id: staff.id }).from(staff).where(activePhone(phone)).for("share");
+      if (person?.id !== staffId || await recentFailures(tx, phone) >= phoneFailureLimit) return;
+      const [pending] = await tx.select({ id: otpCodes.id }).from(otpCodes).where(and(
+        eq(otpCodes.id, id), isNull(otpCodes.consumedAt), isNull(otpCodes.verificationSid),
+        gt(otpCodes.expiresAt, sql`clock_timestamp()`),
+      ));
+      if (!pending) return;
+      const [previous] = await tx.select({ sid: otpCodes.verificationSid }).from(otpCodes)
+        .where(and(eq(otpCodes.phone, phone), isNotNull(otpCodes.verificationSid)))
+        .orderBy(desc(otpCodes.createdAt)).limit(1);
+      if (previous?.sid) await cancelVerification(previous.sid);
+      const sid = await startVerification(phone);
+      await tx.update(otpCodes).set({ verificationSid: sid }).where(eq(otpCodes.id, id));
+    });
+  } catch {
+    // Leave the challenge without a provider reference so it cannot be redeemed.
+    console.error("Staff verification delivery failed");
+  }
+}
+
 export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1"): Promise<CodeRequest> {
   const phone = normalizePhone(input);
   if (!phone) return { kind: "invalid" };
@@ -72,20 +96,12 @@ export async function requestSignInCode(input: unknown, clientIp = "127.0.0.1"):
     if (!person || await recentFailures(tx, phone) >= phoneFailureLimit) return { kind: "accepted" };
 
     const id = randomUUID();
-    const code = randomInt(1000000).toString().padStart(6, "0");
     const ttl = Math.min(10, setting("OTP_TTL_MINUTES", 10)) * 60000;
     await tx.update(otpCodes).set({ consumedAt: now }).where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)));
     await tx.insert(otpCodes).values({
-      id, phone, codeHash: sign(`otp:${id}:${code}`), createdAt: now, expiresAt: new Date(+now + ttl),
+      id, phone, createdAt: now, expiresAt: new Date(+now + ttl),
     });
-    return { kind: "accepted", deliver: async () => {
-      try {
-        await sendCode(phone, code);
-      } catch {
-        console.error("Sign-in SMS delivery failed");
-        await getDb().update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, id));
-      }
-    } };
+    return { kind: "accepted", deliver: () => deliverVerification(phone, person.id, id) };
   });
 }
 
@@ -103,8 +119,8 @@ export async function verifySignInCode(input: unknown, code: unknown, clientIp =
     const [otp] = await tx.select().from(otpCodes)
       .where(and(eq(otpCodes.phone, phone), isNull(otpCodes.consumedAt)))
       .orderBy(desc(otpCodes.createdAt)).limit(1);
-    if (!otp || otp.expiresAt <= now || otp.failedAttempts >= Math.min(5, setting("OTP_MAX_ATTEMPTS", 5))) return null;
-    if (!matches(otp.codeHash, sign(`otp:${otp.id}:${code}`))) {
+    if (!otp?.verificationSid || otp.expiresAt <= now || otp.failedAttempts >= Math.min(5, setting("OTP_MAX_ATTEMPTS", 5))) return null;
+    if (!await checkVerification(phone, code, otp.verificationSid)) {
       await tx.update(otpCodes).set({ failedAttempts: otp.failedAttempts + 1 }).where(eq(otpCodes.id, otp.id));
       await tx.delete(otpFailures).where(and(
         eq(otpFailures.phone, phone), lte(otpFailures.failedAt, failureCutoff),
@@ -112,6 +128,7 @@ export async function verifySignInCode(input: unknown, code: unknown, clientIp =
       await tx.insert(otpFailures).values({ phone, failedAt: sql`statement_timestamp()` });
       return failures + 1 === phoneFailureLimit ? "locked" as const : null;
     }
+    if (otp.expiresAt.getTime() <= Date.now()) return null;
     const expiresAt = new Date(+now + Math.min(30, setting("SESSION_MAX_DAYS", 30)) * 86400000);
     await tx.update(otpCodes).set({ consumedAt: now }).where(eq(otpCodes.id, otp.id));
     const [session] = await tx.insert(sessions)
