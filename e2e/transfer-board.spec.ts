@@ -57,9 +57,11 @@ test("two staff see departures across phones, with independent section preferenc
     await expect(page.getByText(t("en", "operationIdLabel", { id: operationId }))).toBeVisible();
     await expect(page.getByText(en.boardBackToPlanned)).toHaveCount(0);
     await page.getByRole("link", { name: t("en", "boardBackToStore", { store: "East Village" }) }).click();
-    await page.getByText(en.boardSections, { exact: true }).click();
+    await page.locator("summary").filter({ hasText: en.boardSections }).click();
     await page.getByRole("checkbox", { name: en.boardArriving, exact: true }).uncheck();
+    await expect(page.getByRole("region", { name: en.boardArriving })).toHaveCount(0);
     await page.getByRole("button", { name: en.boardSaveSections }).click();
+    await expect(page.getByText(en.boardSectionsSaved, { exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: en.boardArriving })).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole("region", { name: en.phaseProcessing })).toBeVisible();
@@ -76,6 +78,9 @@ test("two staff see departures across phones, with independent section preferenc
       .filter({ has: other.getByRole("link", { name: next, exact: true }) });
     other.on("dialog", (d) => d.accept());
     await card.getByRole("button", { name: en.boardReceive }).click();
+    const sheet = other.getByRole("dialog", { name: en.boardReceive });
+    await expect(sheet.locator("p")).toHaveText(t("en", "boardConfirmAction", { action: en.boardReceive, id: next }));
+    await sheet.getByRole("button", { name: en.boardReceive }).click();
     await other.getByRole("button", { name: en.boardStartProcessing, exact: true }).first().click();
     await other.getByRole("button", { name: en.boardMarkReady, exact: true }).first().click();
     await expect(

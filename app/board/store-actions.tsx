@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { t, type Locale } from "../../i18n";
 import type { StoreId } from "../../db/eligible-orders";
 import { correctionReasonLimit, type PhaseCorrection, type StoreAction } from "../../transfer/commands";
+import { ConfirmSheet } from "../ui/confirm-sheet";
 import { useBatchChange } from "../use-batch-change";
 
 const Changes = createContext<(ReturnType<typeof useBatchChange> & { locale: Locale }) | null>(null);
@@ -36,15 +37,24 @@ export function BoardChanges({
   );
 }
 
-export function StoreButton({ command, label }: { command: StoreAction; label: string }) {
+export function StoreButton({ command, label, sheet = false }: { command: StoreAction; label: string; sheet?: boolean }) {
   const changes = useContext(Changes);
+  const [open, setOpen] = useState(false);
   if (!changes) throw new Error("Board change controls require BoardChanges");
+  const prompt = t(changes.locale, "boardConfirmAction", { action: label, id: command.batchId });
+  if (sheet) return <>
+    <button type="button" className="btn btn-outline" disabled={changes.uncertain || changes.busy}
+      onClick={() => setOpen(true)}>{label}</button>
+    <ConfirmSheet open={open} title={label} prompt={prompt} cancelLabel={t(changes.locale, "cancel")}
+      onClose={() => setOpen(false)} onConfirm={() => {
+        if (!changes.uncertain && !changes.busy) void changes.submit(command);
+      }} />
+  </>;
   return (
     <button
       type="button"
       disabled={changes.uncertain || changes.busy}
       onClick={() => {
-        const prompt = t(changes.locale, "boardConfirmAction", { action: label, id: command.batchId });
         if (window.confirm(prompt)) void changes.submit(command);
       }}
     >

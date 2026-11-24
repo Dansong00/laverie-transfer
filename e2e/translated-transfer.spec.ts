@@ -68,9 +68,10 @@ test("Spanish staff screens preserve store, customer, ticket and handoff details
 
     await page.goto("/board?store=east_village");
     await expect(page.getByRole("heading", { name: t("es", "board"), exact: true })).toBeVisible();
-    await page.getByText(t("es", "boardSections"), { exact: true }).click();
+    await page.locator("summary").filter({ hasText: t("es", "boardSections") }).click();
     await expect(page.getByRole("group", { name: t("es", "boardShowSections") })).toBeVisible();
     await expect(page.getByRole("button", { name: t("es", "boardSaveSections") })).toBeVisible();
+    await page.getByRole("button", { name: t("es", "done") }).click();
     await page.getByRole("region", { name: t("es", "boardArriving") }).getByRole("link", { name: batch }).click();
     await expect(page.getByRole("heading", { name: t("es", "handoffHistory"), exact: true })).toBeVisible();
     const date = page.locator("ol time").first();
